@@ -77,7 +77,16 @@ class AIService {
       // Fall through to cloud on any on-device failure.
     }
 
-    final result = await _cloud.generate(prompt: finalPrompt, images: images);
+    // A photo is a few hundred KB of base64 on top of the request; on real
+    // mobile data that upload alone can take longer than a text call's budget.
+    final hasImage = images != null && images.isNotEmpty;
+    final result = await _cloud.generate(
+      prompt: finalPrompt,
+      images: images,
+      timeout: hasImage
+          ? const Duration(seconds: 45)
+          : const Duration(seconds: 25),
+    );
     if (result.hasText) {
       return _formatResponse(result.value!, browsingContext);
     }
@@ -96,7 +105,9 @@ class AIService {
   Future<String?> explain(
     String promptText, {
     void Function(String sentence)? onSentence,
-    Duration timeout = const Duration(seconds: 6),
+    // Generous — this is the "answer or we speak the template" budget, and on
+    // mobile data 6s isn't enough for the round trip plus generation.
+    Duration timeout = const Duration(seconds: 25),
   }) async {
     // On-device first once GemmaBackend is wired; cloud today. Either way the
     // full text is split into sentences here so TTS can start on sentence one.
