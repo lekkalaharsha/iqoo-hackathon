@@ -326,18 +326,31 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     try {
       await SpeechConfig.apply(_tts);
       // If the device's TTS engine has no usable English voice, say so once
-      // (best effort — a fallback voice may still speak it) and show it for a
-      // sighted helper, instead of the app just going silent.
+      // (best effort — a fallback voice may still speak it) and offer a
+      // one-tap jump to the system Text-to-speech settings.
       if (SpeechConfig.ttsHealthy.value == false) {
-        _showSnackBar(SpeechConfig.ttsBrokenAdvice);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(SpeechConfig.ttsBrokenAdvice),
+            behavior: SnackBarBehavior.floating,
+            backgroundColor: Colors.grey[900],
+            duration: const Duration(seconds: 8),
+            action: SnackBarAction(
+              label: 'Open',
+              onPressed: AssistSetup.openTtsSettings,
+            ),
+          ));
+        }
         SpokenText.last = SpeechConfig.ttsBrokenAdvice;
         await _tts.speak(SpeechConfig.ttsBrokenAdvice);
         return;
       }
-      final msg = _localization.isTamil
-          ? 'AI அனைவருக்கும் தயார். படம் எடுக்க எங்கும் தட்டவும்.'
-          : 'Logic Legends ready. Read and Explain mode. Point at printed text '
-              'and tap anywhere to read it. Swipe left or right to change mode.';
+      final online = _connectivityResult != ConnectivityResult.none;
+      final msg = online
+          ? 'Logic Legends ready. Read and Explain mode. Point at printed text '
+              'and tap anywhere to read it. Swipe left or right to change mode.'
+          : 'Logic Legends ready, but there is no internet. Reading printed '
+              'text works offline. Scene descriptions need a connection.';
       SpokenText.last = msg;
       await _tts.speak(msg);
     } catch (_) {}

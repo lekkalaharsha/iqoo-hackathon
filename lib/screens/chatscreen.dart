@@ -435,6 +435,8 @@ class _ChatscreenState extends State<Chatscreen> {
     );
   }
 
+  Timer? _waitCue; // "still working" heartbeat while an answer is pending
+
   void _sendMessage(ChatMessage chatMessage) {
     if (_configService.initialized &&
         _configService.appConfig.features.vibrationFeedback) {
@@ -444,6 +446,11 @@ class _ChatscreenState extends State<Chatscreen> {
     setState(() {
       messages = [chatMessage, ...messages];
       _isLoading = true;
+    });
+
+    _waitCue?.cancel();
+    _waitCue = Timer.periodic(const Duration(seconds: 6), (_) {
+      if (_isLoading && !_listening) _speak('Still working.');
     });
 
     _getAIResponse(chatMessage);
@@ -531,6 +538,7 @@ class _ChatscreenState extends State<Chatscreen> {
   }
 
   void _handleResponse(String response, {bool fromCache = false}) {
+    _waitCue?.cancel();
     if (!mounted) return;
 
     final displayResponse =
@@ -580,6 +588,7 @@ class _ChatscreenState extends State<Chatscreen> {
   @override
   void dispose() {
     _keySub?.cancel();
+    _waitCue?.cancel();
     _holding = false;
     _stt.stop();
     _stt.cancel();

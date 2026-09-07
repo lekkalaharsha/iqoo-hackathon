@@ -13,4 +13,13 @@ class AssistSetup {
       return false;
     }
   }
+
+  /// Jump to the system Text-to-speech settings (to reinstall/repair a voice).
+  static Future<bool> openTtsSettings() async {
+    try {
+      return (await _channel.invokeMethod<bool>('openTtsSettings')) ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
 }

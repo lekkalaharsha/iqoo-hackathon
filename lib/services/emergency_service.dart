@@ -19,6 +19,7 @@ class EmergencyService {
 
   static const _channel = MethodChannel('aiforall/phone');
   static const _prefsKey = 'emergency_contact';
+  static const _labelKey = 'emergency_contact_label';
   static const countdownSeconds = 5;
 
   final FlutterTts _tts = SpeechConfig.tts;
@@ -38,6 +39,20 @@ class EmergencyService {
 
   static Future<void> setContact(String number) async =>
       (await SharedPreferences.getInstance()).setString(_prefsKey, number);
+
+  /// Optional name spoken instead of "your emergency contact" ("Calling Amma").
+  static Future<String?> getContactLabel() async =>
+      (await SharedPreferences.getInstance()).getString(_labelKey);
+
+  static Future<void> setContactLabel(String label) async {
+    final p = await SharedPreferences.getInstance();
+    final t = label.trim();
+    if (t.isEmpty) {
+      await p.remove(_labelKey);
+    } else {
+      await p.setString(_labelKey, t);
+    }
+  }
 
   /// Speaks the user's location, then counts down and calls.
   /// [onTick] reports seconds remaining so the UI can show it.
@@ -67,10 +82,13 @@ class EmergencyService {
     await _speak(await _locationSentence());
     if (_cancelled) return;
 
+    final label = await getContactLabel();
+    final who = (label == null || label.isEmpty)
+        ? 'your emergency contact'
+        : label;
     await _speak(_localization.isTamil
         ? 'அவசர அழைப்பு $remaining வினாடிகளில். நிறுத்த திரையைத் தட்டவும்.'
-        : 'Calling your emergency contact in $remaining seconds. '
-            'Tap the screen to stop.');
+        : 'Calling $who in $remaining seconds. Tap the screen to stop.');
     if (_cancelled) return;
 
     _timer?.cancel();

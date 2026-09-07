@@ -7,6 +7,7 @@ import '../services/ai_service.dart';
 import '../services/offline_cache_service.dart';
 import '../services/voice_assistant_service.dart';
 import '../services/emergency_service.dart';
+import '../services/speech_config.dart';
 import '../widgets/debug_overlay.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -35,6 +36,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _debugOverlay = false;
   String _locale = 'en';
   String? _emergencyContact;
+  String? _emergencyLabel;
+  double _speechRate = SpeechConfig.rate;
+  bool _briefAnswers = false;
   Map<String, dynamic>? _cacheStats;
   bool _loading = true;
 
@@ -66,9 +70,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _locale = _localization.currentLocale;
       _loading = false;
     });
+    await SpeechConfig.ensurePrefs();
     final contact = await EmergencyService.getContact();
-    if (mounted) setState(() => _emergencyContact = contact);
+    final label = await EmergencyService.getContactLabel();
+    if (mounted) {
+      setState(() {
+        _emergencyContact = contact;
+        _emergencyLabel = label;
+        _speechRate = SpeechConfig.rate;
+        _briefAnswers = SpeechConfig.briefAnswers;
+      });
+    }
     await _loadCacheStats();
+  }
+
+  Future<void> _nudgeRate(double delta) async {
+    final next = (_speechRate + delta)
+        .clamp(SpeechConfig.minRate, SpeechConfig.maxRate);
+    await SpeechConfig.setRate(next);
+    if (mounted) setState(() => _speechRate = SpeechConfig.rate);
+    await SpeechConfig.tts.stop();
+    await SpeechConfig.tts
+        .speak(delta < 0 ? 'Slower. This is the new speed.' : 'Faster. This is the new speed.');
   }
 
   Future<void> _loadCacheStats() async {
@@ -142,44 +165,68 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _setEmergencyContact() async {
-    final controller =
+    final numberCtl =
         TextEditingController(text: await EmergencyService.getContact() ?? '');
+    final labelCtl = TextEditingController(
+        text: await EmergencyService.getContactLabel() ?? '');
     if (!mounted) return;
-    final result = await showDialog<String>(
+    final result = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(_locale == 'ta' ? 'அவசர தொடர்பு' : 'Emergency contact'),
-        content: TextField(
-          controller: controller,
-          keyboardType: TextInputType.phone,
-          autofocus: true,
-          decoration: InputDecoration(
-            hintText: '+91…',
-            helperText: _locale == 'ta'
-                ? 'நம்பகமான நபரின் எண். அவசர சேவைகள் அல்ல.'
-                : 'A person you trust — not emergency services.',
-          ),
+        title: const Text('Emergency contact'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: labelCtl,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(
+                labelText: 'Name (spoken aloud)',
+                hintText: 'e.g. Amma',
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: numberCtl,
+              keyboardType: TextInputType.phone,
+              decoration: const InputDecoration(
+                labelText: 'Phone number',
+                hintText: '+91…',
+                helperText: 'A person you trust — not emergency services.',
+              ),
+            ),
+          ],
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(_locale == 'ta' ? 'ரத்து' : 'Cancel'),
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
           ),
           TextButton(
-            onPressed: () => Navigator.pop(context, controller.text.trim()),
-            child: Text(_locale == 'ta' ? 'சேமி' : 'Save'),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Save'),
           ),
         ],
       ),
     );
 
-    if (result == null || result.isEmpty) return;
-    await EmergencyService.setContact(result);
+    if (result != true) return;
+    final number = numberCtl.text.trim();
+    if (number.isEmpty) return;
+    await EmergencyService.setContact(number);
+    await EmergencyService.setContactLabel(labelCtl.text);
     await EmergencyService.ensurePermission();
     if (!mounted) return;
-    setState(() => _emergencyContact = result);
+    final label = labelCtl.text.trim();
+    setState(() {
+      _emergencyContact = number;
+      _emergencyLabel = label.isEmpty ? null : label;
+    });
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Emergency contact set to $result')),
+      SnackBar(
+          content: Text(label.isEmpty
+              ? 'Emergency contact set to $number'
+              : 'Emergency contact set to $label ($number)')),
     );
   }
 
@@ -283,6 +330,60 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     trailing: const Icon(Icons.edit, color: Colors.blue),
                   ),
                 ]),
+                _buildSection('Speaking', [
+                  ListTile(
+                    leading: const Icon(Icons.speed),
+                    title: const Text('Speaking speed'),
+                    subtitle: Text(
+                        '${(_speechRate * 100).round()}% — use the buttons to adjust'),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            icon: const Icon(Icons.remove),
+                            label: const Text('Slower'),
+                            onPressed: _speechRate <= SpeechConfig.minRate
+                                ? null
+                                : () => _nudgeRate(-0.05),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            icon: const Icon(Icons.add),
+                            label: const Text('Faster'),
+                            onPressed: _speechRate >= SpeechConfig.maxRate
+                                ? null
+                                : () => _nudgeRate(0.05),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        TextButton(
+                          onPressed: () async {
+                            await SpeechConfig.tts.stop();
+                            await SpeechConfig.tts.speak(
+                                'This is a test of the speaking speed. Adjust it until it is comfortable.');
+                          },
+                          child: const Text('Test'),
+                        ),
+                      ],
+                    ),
+                  ),
+                  _buildSwitchTile(
+                    title: 'Brief answers',
+                    subtitle: 'One short sentence instead of up to three',
+                    value: _briefAnswers,
+                    onChanged: (v) async {
+                      await SpeechConfig.setBriefAnswers(v);
+                      setState(() => _briefAnswers = v);
+                    },
+                    leading: Icon(_briefAnswers ? Icons.short_text : Icons.notes,
+                        color: _briefAnswers ? Colors.green : Colors.grey),
+                  ),
+                ]),
                 _buildSection('Accessibility', [
                   _buildSwitchTile(
                     title: _localization.tr('tts_enabled'),
@@ -332,10 +433,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     leading: Icon(Icons.emergency_share,
                         color: _emergencyContact == null ? Colors.grey : Colors.red),
                     title: Text(isTamil ? 'அவசர தொடர்பு' : 'Emergency contact'),
-                    subtitle: Text(_emergencyContact ??
-                        (isTamil
-                            ? 'அமைக்கப்படவில்லை — நீண்ட அழுத்தம் அழைக்கும்'
-                            : 'Not set — long-press the camera to call')),
+                    subtitle: Text(_emergencyContact == null
+                        ? 'Not set — long-press the camera to call'
+                        : _emergencyLabel == null
+                            ? _emergencyContact!
+                            : '$_emergencyLabel · $_emergencyContact'),
                     onTap: _setEmergencyContact,
                     trailing: const Icon(Icons.edit, color: Colors.blue),
                   ),

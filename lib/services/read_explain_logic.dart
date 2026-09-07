@@ -120,10 +120,16 @@ String fallbackSentence(DocType type, String ocrText) {
 
 /// The instruction sent to the language model. Deliberately asks for actions,
 /// not a summary — explaining what to do is the whole product.
-String explainPrompt(DocType type, String ocrText, {String? userQuestion}) {
-  const base =
+///
+/// [brief] (Settings > Brief answers) asks for a single sentence.
+String explainPrompt(DocType type, String ocrText,
+    {String? userQuestion, bool brief = false}) {
+  final length = brief
+      ? 'Answer in one short sentence'
+      : 'Answer in at most three short sentences';
+  final base =
       'You are helping a blind person who cannot see this document. '
-      'Answer in at most three short sentences, plain spoken English, no '
+      '$length, plain spoken English, no '
       'formatting or bullet points. Do not repeat the raw text back. Use only '
       'facts stated in the captured text. Never infer a medicine purpose, safe '
       'dose, expiry, bill amount, due date, legal requirement, or identity. '
@@ -228,6 +234,9 @@ void main() {
 
   assert(explainPrompt(DocType.medicine, 'x')
       .contains('only when each is explicitly present and clear'));
+  assert(explainPrompt(DocType.bill, 'x').contains('at most three short'));
+  assert(explainPrompt(DocType.bill, 'x', brief: true)
+      .contains('one short sentence'));
   assert(collapseWhitespace(' a \n\n b  ') == 'a b');
 
   // UPI deep link: only when a real VPA is present; amount is optional.
