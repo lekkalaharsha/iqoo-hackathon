@@ -120,7 +120,7 @@ class _InboxScreenState extends State<InboxScreen> {
   Future<void> _readOne(_Msg m) async {
     setState(() => _phase = _Phase.reading);
     final pos = 'Message ${_index + 1} of ${_messages.length}';
-    final who = _shortSender(m.sender);
+    final who = shortSender(m.sender);
 
     if (m.r.risk == SmsRisk.danger) {
       // Warn first, then read a redacted version — no code digits, no URL.
@@ -166,7 +166,7 @@ class _InboxScreenState extends State<InboxScreen> {
     await _say('${important.length} important messages.');
     for (final m in important) {
       if (_cancelled) return;
-      await _say('From ${_shortSender(m.sender)}. '
+      await _say('From ${shortSender(m.sender)}. '
           '${m.r.risk == SmsRisk.danger ? _redact(m.body) : m.body}');
     }
   }
@@ -194,13 +194,6 @@ class _InboxScreenState extends State<InboxScreen> {
     _lastSpoken = t;
     SpokenText.last = t; // keep the app-wide Volume-Down repeat in sync
     await _tts.speak(t);
-  }
-
-  String _shortSender(String s) {
-    final alpha = RegExp(r'[A-Za-z]{3,}').firstMatch(s)?.group(0);
-    if (alpha != null) return alpha;
-    final digits = s.replaceAll(RegExp(r'\D'), '');
-    return digits.length >= 4 ? digits.substring(digits.length - 4) : s;
   }
 
   /// Strip URLs and long digit runs (OTP codes) so a scam message can be read
@@ -275,7 +268,7 @@ class _InboxScreenState extends State<InboxScreen> {
               const SizedBox(width: 4),
               Expanded(
                 child: Text(
-                  '${_shortSender(m.sender)} · ${m.r.type.name}'
+                  '${shortSender(m.sender)} · ${m.r.type.name}'
                   '${danger ? ' · SCAM?' : caution ? ' · check' : ''}',
                   style: const TextStyle(
                       fontSize: 12, fontWeight: FontWeight.bold),

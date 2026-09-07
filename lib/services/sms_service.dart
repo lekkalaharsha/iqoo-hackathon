@@ -42,7 +42,7 @@ class SmsService {
 
   void _announce(String sender, String body) {
     final r = classifySms(body);
-    final who = _shortSender(sender);
+    final who = shortSender(sender);
     final ta = _localization.isTamil;
     String line;
     switch (r.type) {
@@ -65,13 +65,6 @@ class SmsService {
         break;
     }
     _tts.speak(line);
-  }
-
-  String _shortSender(String s) {
-    final alpha = RegExp(r'[A-Za-z]{3,}').firstMatch(s)?.group(0);
-    if (alpha != null) return alpha;
-    final digits = s.replaceAll(RegExp(r'\D'), '');
-    return digits.length >= 4 ? digits.substring(digits.length - 4) : s;
   }
 
   void dispose() => _tts.stop();

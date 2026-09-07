@@ -31,6 +31,16 @@ SmsResult classifySms(String body) {
   return SmsResult(base.type, code: base.code, risk: risk.risk, warning: risk.warning);
 }
 
+/// A short, speakable sender name: the first alpha run of a sender ID
+/// ("VM-HDFCBK" → "HDFCBK"), or the last 4 digits of a phone number.
+/// Shared by the SMS reader and the inbox screen.
+String shortSender(String sender) {
+  final alpha = RegExp(r'[A-Za-z]{3,}').firstMatch(sender)?.group(0);
+  if (alpha != null) return alpha;
+  final digits = sender.replaceAll(RegExp(r'\D'), '');
+  return digits.length >= 4 ? digits.substring(digits.length - 4) : sender;
+}
+
 SmsResult _classifyType(String body) {
   final t = body.toLowerCase();
 
@@ -227,6 +237,12 @@ void main() {
   // A danger message always carries a spoken warning.
   final d = classifySms('URGENT account blocked, verify http://bit.ly/x');
   assert(d.risk == SmsRisk.danger && (d.warning?.isNotEmpty ?? false));
+
+  // shortSender: alpha run wins, else last 4 digits, else the raw string.
+  assert(shortSender('VM-HDFCBK') == 'HDFCBK');
+  assert(shortSender('+91 98765 43210') == '3210');
+  assert(shortSender('AD-720912') == '0912');
+  assert(shortSender('12') == '12');
 
   print('sms_classifier: all checks passed');
 }
