@@ -48,17 +48,15 @@ class _ChatscreenState extends State<Chatscreen> {
   String? _lastAIResponse;
   String? _imageHash;
 
-  // ChatGPT-style voice chat: speak, it transcribes + sends, reads the answer
-  // aloud, then re-opens the mic for the next turn until you toggle it off.
+  // Push-to-talk voice chat: hold anywhere on the screen to listen, release to
+  // send that turn. The answer is spoken aloud; the next turn is another hold.
+  // (Replaces a mic toggle + a spoken "clear over" terminator.)
   bool _sttReady = false;
   bool _sttSetupComplete = false;
-  bool _voiceMode = false;
-  bool _listening = false;
-  bool _turnSubmitted = false;
-  String _voiceDraft = '';
+  bool _holding = false; // finger is down for push-to-talk
+  bool _listening = false; // mic is open
+  String _pttWords = ''; // latest transcription for the current hold
   String? _speechLocaleId;
-  Timer? _restartTimer;
-  Timer? _turnTimeout;
 
   ChatUser currentUser = ChatUser(id: "0", firstName: "User");
   ChatUser geminiUser = ChatUser(
@@ -96,7 +94,9 @@ class _ChatscreenState extends State<Chatscreen> {
     await _setupTTS();
     await _setupStt();
     if (widget.autoStartVoice && mounted) {
-      await _toggleVoiceMode();
+      await _speak(_sttReady
+          ? 'Voice chat. Hold anywhere on the screen and speak. Release to send.'
+          : 'Voice recognition is not available on this phone. You can type your message instead.');
     }
   }
 
@@ -110,38 +110,22 @@ class _ChatscreenState extends State<Chatscreen> {
     try {
       _sttReady = await _stt.initialize(
         onStatus: (s) {
-          // A listen turn can end with only this callback (silence, no result).
+          // The recogniser closed the session (silence, or our stop() on
+          // release). Nothing to restart — the next turn is another hold.
           if (s == 'done' || s == 'notListening') {
             if (mounted) setState(() => _listening = false);
-            // Android may end a recognition session after a pause. Re-open it
-            // while retaining the question until the user says "clear over".
-            if (_voiceMode && !_isLoading && !_turnSubmitted) {
-              _restartTimer?.cancel();
-              _restartTimer = Timer(const Duration(milliseconds: 1200), () {
-                if (_voiceMode && !_isLoading && !_listening) _listenOnce();
-              });
-            }
           }
         },
         onError: (error) {
-          if (!_voiceMode) return;
           final code = error.errorMsg;
+          if (mounted) setState(() => _listening = false);
+          // "no_match" / "speech_timeout" just means nothing was heard during
+          // the hold — _endHold() already tells the user. Only surface the
+          // harder failures.
           if (code.contains('no_match') || code.contains('speech_timeout')) {
-            if (mounted) setState(() => _listening = false);
-            _restartTimer?.cancel();
-            _restartTimer = Timer(const Duration(milliseconds: 1200), () {
-              if (_voiceMode && !_isLoading && !_listening && !_turnSubmitted) {
-                _listenOnce();
-              }
-            });
             return;
           }
-          if (mounted) {
-            setState(() {
-              _listening = false;
-              _voiceMode = false;
-            });
-          }
+          if (!_holding) return; // stale error after release
           HapticFeedback.heavyImpact();
           _speak(_speechErrorMessage(code));
         },
@@ -163,132 +147,76 @@ class _ChatscreenState extends State<Chatscreen> {
     if (mounted) setState(() {});
   }
 
-  Future<void> _toggleVoiceMode() async {
+  /// Finger down anywhere on the screen — open the mic and keep it open until
+  /// the finger lifts. No pause/length limit: the user decides when the turn
+  /// ends by releasing.
+  Future<void> _startHold() async {
+    if (_holding || _listening || _isLoading) return;
     if (!_sttSetupComplete) {
-      await _speak('Voice input is still getting ready. Try again shortly.');
+      await _speak('Voice input is still getting ready. Try again in a moment.');
       return;
     }
     if (!_sttReady) {
       final permission = await Permission.microphone.status;
       await _speak(permission.isPermanentlyDenied
-          ? 'Microphone permission is blocked. Enable it in Android app settings, then try again.'
+          ? 'Microphone permission is blocked. Enable it in Android app settings.'
           : permission.isDenied
               ? 'Microphone permission is required for voice chat. Allow it, then try again.'
               : 'Voice recognition is not available on this phone. You can still type a message.');
       return;
     }
-    setState(() => _voiceMode = !_voiceMode);
-    HapticFeedback.mediumImpact();
-    if (_voiceMode) {
-      await _speak(
-          'Voice chat on. Speak after the vibration. Say clear over when your question is finished. Tap anywhere to cancel.');
-      await _beginNextVoiceTurn();
-    } else {
-      _restartTimer?.cancel();
-      _turnTimeout?.cancel();
-      _voiceDraft = '';
-      await _stt.stop();
-      await _speak('Voice chat off.');
-    }
-  }
-
-  Future<void> _listenOnce() async {
-    if (!_sttReady || !_voiceMode || _listening || _isLoading) return;
-    await _tts.stop();
+    _holding = true;
+    _pttWords = '';
+    await _tts.stop(); // barge in over any answer being read
+    if (!_holding) return; // released during the await
     setState(() => _listening = true);
-    HapticFeedback.lightImpact();
+    HapticFeedback.mediumImpact();
     await _stt.listen(
-      onResult: (r) {
-        if (_turnSubmitted) return;
-        final segment = r.recognizedWords.trim();
-        if (segment.isEmpty) return;
-        final combined = [_voiceDraft, segment]
-            .where((part) => part.isNotEmpty)
-            .join(' ')
-            .trim();
-        final utterance = parseVoiceChatUtterance(combined);
-        if (!utterance.isComplete && !r.finalResult) return;
-        if (!utterance.isComplete) {
-          _voiceDraft = combined;
-          return;
-        }
-        _turnSubmitted = true;
-        _turnTimeout?.cancel();
-        _restartTimer?.cancel();
-        _stt.stop();
-        if (mounted) setState(() => _listening = false);
-        final text = utterance.text;
-        if (text.isEmpty) {
-          _turnSubmitted = false;
-          _voiceDraft = '';
-          _startTurnTimeout();
-          _speak('Please say your question, then say clear over.').then((_) {
-            if (_voiceMode && mounted) _listenOnce();
-          });
-          return;
-        }
-        final control = parseVoiceChatControl(text);
-        if (control == VoiceChatControl.stop) {
-          setState(() => _voiceMode = false);
-          _turnTimeout?.cancel();
-          _stt.stop();
-          _speak('Voice chat off.');
-          return;
-        }
-        if (control == VoiceChatControl.repeat) {
-          if (_lastAIResponse == null) {
-            _speak('There is no assistant answer to repeat yet.').then((_) {
-              if (_voiceMode && mounted) _beginNextVoiceTurn();
-            });
-            return;
-          }
-          _speakLastResponse().then((_) {
-            if (_voiceMode && mounted) _beginNextVoiceTurn();
-          });
-          return;
-        }
-        HapticFeedback.mediumImpact();
-        _voiceDraft = '';
-        _sendMessage(ChatMessage(
-          user: currentUser,
-          createdAt: DateTime.now(),
-          text: text,
-        ));
-      },
+      onResult: (r) => _pttWords = r.recognizedWords.trim(),
       listenOptions: stt.SpeechListenOptions(
         listenMode: stt.ListenMode.dictation,
         partialResults: true,
         onDevice: false,
-        listenFor: const Duration(seconds: 20),
-        pauseFor: const Duration(seconds: 3),
+        // Long ceilings — the release, not a timer, ends the turn.
+        listenFor: const Duration(seconds: 120),
+        pauseFor: const Duration(seconds: 120),
         localeId: _speechLocaleId,
       ),
     );
   }
 
-  void _startTurnTimeout() {
-    _turnTimeout?.cancel();
-    _turnTimeout = Timer(const Duration(minutes: 2), () async {
-      if (!_voiceMode || _isLoading || _turnSubmitted) return;
-      _restartTimer?.cancel();
-      await _stt.stop();
-      if (mounted) {
-        setState(() {
-          _voiceMode = false;
-          _listening = false;
-        });
-      }
-      await _speak(
-          'I did not hear clear over within two minutes. Voice chat is off. Tap the microphone to try again.');
-    });
-  }
+  /// Finger lifted (or the long-press was cancelled). Stop the mic and send
+  /// what was heard, unless [submit] is false (gesture cancelled).
+  Future<void> _endHold({bool submit = true}) async {
+    if (!_holding) return;
+    _holding = false;
+    HapticFeedback.lightImpact();
+    await _stt.stop();
+    // A final result can land just after stop() returns.
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    if (mounted) setState(() => _listening = false);
 
-  Future<void> _beginNextVoiceTurn() async {
-    if (!_voiceMode || !mounted) return;
-    _voiceDraft = '';
-    _turnSubmitted = false;
-    _startTurnTimeout();
-    await _listenOnce();
+    final text = _pttWords.trim();
+    _pttWords = '';
+    if (!submit) return;
+    if (text.isEmpty) {
+      await _speak("Didn't catch that. Hold the screen and speak again.");
+      return;
+    }
+    // "repeat" / "say that again" replays the last answer instead of asking.
+    if (parseVoiceChatControl(text) == VoiceChatControl.repeat) {
+      if (_lastAIResponse == null) {
+        await _speak('There is no assistant answer to repeat yet.');
+      } else {
+        await _speakLastResponse();
+      }
+      return;
+    }
+    _sendMessage(ChatMessage(
+      user: currentUser,
+      createdAt: DateTime.now(),
+      text: text,
+    ));
   }
 
   String _speechErrorMessage(String code) {
@@ -298,10 +226,7 @@ class _ChatscreenState extends State<Chatscreen> {
     if (code.contains('network')) {
       return 'Voice recognition could not connect. Check your internet, or type your message.';
     }
-    if (code.contains('no_match') || code.contains('speech_timeout')) {
-      return "I didn't hear a clear question. Voice chat is off. Tap the microphone to try again.";
-    }
-    return 'Voice recognition stopped unexpectedly. Tap the microphone to try again.';
+    return 'Voice recognition stopped unexpectedly. Hold the screen to try again.';
   }
 
   Future<void> _speak(String text) async {
@@ -321,8 +246,6 @@ class _ChatscreenState extends State<Chatscreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isTamil = _localization.isTamil;
-
     return Scaffold(
       appBar: AppBar(
         centerTitle: true,
@@ -343,48 +266,55 @@ class _ChatscreenState extends State<Chatscreen> {
             ),
         ],
       ),
-      body: Stack(
-        children: [
-          _buildUI(),
-          if (_listening) _buildListeningOverlay(isTamil),
-        ],
+      // Hold anywhere = talk; release = send. translucent so the whole screen
+      // (including gaps between messages) starts a hold, without blocking taps
+      // on the text field / send button or scrolling the transcript.
+      // Note: TalkBack claims long-press for its own menu — this gesture is for
+      // the app's own spoken-feedback model, not a TalkBack session.
+      body: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onLongPressStart: (_) => _startHold(),
+        onLongPressEnd: (_) => _endHold(),
+        onLongPressCancel: () => _endHold(submit: false),
+        child: Stack(
+          children: [
+            _buildUI(),
+            if (_listening) _buildListeningOverlay(),
+          ],
+        ),
       ),
     );
   }
 
-  /// Full-screen, unmistakable "I'm listening" state — a small mic-icon swap in
-  /// the input row is not enough for a low-vision user. Tap anywhere to stop.
-  Widget _buildListeningOverlay(bool isTamil) {
+  /// Full-screen, unmistakable "I'm listening" state. Non-interactive — the
+  /// hold that opened the mic is still in progress underneath it; lifting the
+  /// finger is what sends.
+  Widget _buildListeningOverlay() {
     return Positioned.fill(
-      child: Semantics(
-        liveRegion: true,
-        button: true,
-        label: isTamil
-            ? 'கேட்கிறது. நிறுத்த தட்டவும்.'
-            : 'Listening. Tap to stop.',
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: _toggleVoiceMode,
+      child: IgnorePointer(
+        child: Semantics(
+          liveRegion: true,
+          label: 'Listening. Release to send.',
           child: Container(
             color: Colors.blue.shade900.withValues(alpha: 0.92),
             alignment: Alignment.center,
-            child: Column(
+            child: const Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.mic, color: Colors.white, size: 96),
-                const SizedBox(height: 24),
+                Icon(Icons.mic, color: Colors.white, size: 96),
+                SizedBox(height: 24),
                 Text(
-                  isTamil ? 'கேட்கிறது…' : 'Listening…',
-                  style: const TextStyle(
+                  'Listening…',
+                  style: TextStyle(
                     color: Colors.white,
                     fontSize: 34,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
-                const SizedBox(height: 12),
+                SizedBox(height: 12),
                 Text(
-                  isTamil ? 'நிறுத்த எங்கும் தட்டவும்' : 'Tap anywhere to stop',
-                  style: const TextStyle(color: Colors.white70, fontSize: 16),
+                  'Release to send',
+                  style: TextStyle(color: Colors.white70, fontSize: 16),
                 ),
               ],
             ),
@@ -396,7 +326,6 @@ class _ChatscreenState extends State<Chatscreen> {
 
   void _showLocationDetails() {
     final data = widget.locationData!;
-    final isTamil = _localization.isTamil;
 
     showModalBottomSheet(
       context: context,
@@ -463,12 +392,11 @@ class _ChatscreenState extends State<Chatscreen> {
       inputOptions: InputOptions(
         trailing: [
           IconButton(
-            onPressed: _toggleVoiceMode,
-            icon: Icon(_listening
-                ? Icons.mic
-                : (_voiceMode ? Icons.graphic_eq : Icons.mic_none)),
-            color: _voiceMode ? Colors.blueAccent : null,
-            tooltip: _voiceMode ? 'Stop voice chat' : 'Start voice chat',
+            onPressed: () => _speak(
+                'Hold anywhere on the screen and speak. Release to send.'),
+            icon: Icon(_listening ? Icons.mic : Icons.touch_app),
+            color: _listening ? Colors.blueAccent : null,
+            tooltip: 'Hold anywhere to talk',
           ),
           IconButton(
             onPressed: _sendMediaMessageFromCamera,
@@ -634,15 +562,11 @@ class _ChatscreenState extends State<Chatscreen> {
       });
     }
 
-    // Accessibility: speak the answer aloud automatically, then in voice-chat
-    // mode re-open the mic for the next turn (ChatGPT-style loop).
+    // Speak the answer aloud. With push-to-talk the next turn is another hold,
+    // so there is no mic to re-open here.
     if (_configService.initialized &&
         _configService.appConfig.features.ttsEnabled) {
-      _speakLastResponse().then((_) {
-        if (_voiceMode && mounted) _beginNextVoiceTurn();
-      });
-    } else if (_voiceMode && mounted) {
-      _beginNextVoiceTurn();
+      _speakLastResponse();
     }
   }
 
@@ -656,9 +580,7 @@ class _ChatscreenState extends State<Chatscreen> {
   @override
   void dispose() {
     _keySub?.cancel();
-    _restartTimer?.cancel();
-    _turnTimeout?.cancel();
-    _voiceMode = false;
+    _holding = false;
     _stt.stop();
     _stt.cancel();
     _tts.stop();

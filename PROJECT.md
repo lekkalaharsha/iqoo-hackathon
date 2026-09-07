@@ -424,6 +424,17 @@ Refactor/cleanup pass plus one product change (tutorial no longer auto-plays).
   and the floating GPS accuracy badge are now gated to `kDebugMode`, so the
   release/demo APK shows neither (GPS accuracy is still on the AppBar
   indicator). Two remaining "A I For All" spoken strings → "Logic Legends".
+- **Voice Chat is now push-to-talk.** Chatscreen: hold anywhere on the screen
+  to listen, release to send that turn (`_startHold` / `_endHold` via
+  `onLongPressStart` / `onLongPressEnd` / `onLongPressCancel`, `translucent`
+  hit-test so taps/scroll still reach DashChat). Replaces the mic toggle, the
+  spoken "clear over" terminator, the 2-minute turn timeout, and the
+  auto-re-listen loop. The listening overlay is now `IgnorePointer` (the hold
+  underneath is what sends). "repeat" still replays the last answer. Homepage
+  long-press = Emergency SOS is untouched — this gesture is Chatscreen-only.
+  Caveat: TalkBack claims long-press for its own menu; this is for the app's
+  own spoken-feedback model. Not device-verified (STT is dead on the Redmi;
+  needs the iQOO).
 - **Voice mode consistency.** `voice_assistant_service` `_switchMode` and the
   command parser now cover all three home modes (0 Explore, 1 Read & Explain,
   2 Voice Chat) — "switch to voice chat" was previously unreachable by voice.
@@ -454,3 +465,4 @@ Refactor/cleanup pass plus one product change (tutorial no longer auto-plays).
 | 2026-09-07 | LLM backend seam | Implemented; automated tested | One `LlmBackend` interface; `GeminiBackend` live, `GemmaBackend` stub; `AIService` refactored; 5 focused tests; analyze clean; arm64 APK builds. | Not applicable; internal refactor, no behaviour change. | Implement `GemmaBackend` with `flutter_gemma` behind the `on_device_llm` flag; benchmark on device. |
 | 2026-09-07 | Voice reaches Voice Chat mode + mode-name fix | Implemented; automated tested | Parser + `_switchMode` cover modes 0–2; `_announceModeChange` reuses `_getModeName` (removes a latent `RangeError`); new parser test passes. | Not tested with a blind participant or on hardware. | Verify "switch to voice chat" by voice on I2305 with the screen covered; confirm the spoken mode name and traversal. |
 | 2026-09-07 | First-run tutorial disabled at launch | Implemented | `_loadAccessibilitySettings` marks onboarding seen and skips the overlay; `_announceReady()` speaks instead. Settings replay path unchanged. arm64 APK builds. | Not tested on hardware. Confirm a clear-data install lands on the camera and speaks "ready", and that the Settings replay still plays all 7 steps. | Device-verify both paths with the screen covered. |
+| 2026-09-07 | Voice Chat push-to-talk | Implemented; analyze clean | Chatscreen hold-to-listen / release-to-send replaces the toggle + "clear over" + timers + auto-loop. Existing voice_chat_logic tests still pass (parseVoiceChatControl reused for "repeat"). | Not tested — STT does not init on the Redmi. | Verify on I2305/iQOO: hold two turns, release-to-send, empty-hold message, "repeat", barge-in over a spoken answer, and TalkBack interaction. |

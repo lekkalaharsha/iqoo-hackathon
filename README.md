@@ -80,8 +80,10 @@ voice. Speech is de-duplicated so unchanged information is never repeated.
    multimodal on-device model (Gemma 3n) is wired; kept out of the demo until
    then.
 3. **Voice Chat** — swipe left once from the default Read & Explain mode, then
-   tap anywhere or press Volume Up. The microphone collects speech across pauses
-   and sends the turn after the user says “clear over.”
+   tap anywhere or press Volume Up to open it. **Push-to-talk:** hold anywhere
+   on the chat screen to listen, release to send that turn; the answer is
+   spoken and the next turn is another hold. Saying "repeat" replays the last
+   answer. Typing still works.
 
 ### Supporting features
 
