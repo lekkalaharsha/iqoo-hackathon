@@ -76,7 +76,6 @@ flutter:
   # To add assets to your application, add an assets section, like this:
   assets:
     - img/
-    - assets/images/
     - assets/config/
     - assets/l10n/
     
@@ -108,9 +107,9 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
-flutter_icons:
-  android: true
-  ios: true
-  image_path: "assets/images/import.jpg"
-  adaptive_icon_background: "#FFFFFF"
-  adaptive_icon_foreground: "assets/images/import.jpg"
+
+# The launcher icon is a hand-written adaptive icon:
+#   android/app/src/main/res/drawable/ic_launcher_foreground.xml  (vector mark)
+#   android/app/src/main/res/values/colors.xml                     (brand background)
+#   android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml     (adaptive-icon)
+# No flutter_launcher_icons config / source image is needed.

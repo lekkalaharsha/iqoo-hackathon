@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Logic Legends adaptive-icon foreground.
+     "It sees, it speaks" — a source dot with three radiating waves.
+     White on the brand background (@color/ic_launcher_background).
+     108x108 canvas; art kept inside the 66dp (18..90) safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- source -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M42,54 m-7,0 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0" />
+
+    <!-- wave 1 -->
+    <path
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="6"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M52,44 A14,14 0 0 1 52,64" />
+
+    <!-- wave 2 -->
+    <path
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="6"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M58,37 A21,21 0 0 1 58,71" />
+
+    <!-- wave 3 -->
+    <path
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="6"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M63,31 A28,28 0 0 1 63,77" />
+</vector>
