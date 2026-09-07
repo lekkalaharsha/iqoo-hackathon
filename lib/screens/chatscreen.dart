@@ -1,7 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
-import 'dart:convert';
 import 'package:dash_chat_2/dash_chat_2.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
@@ -16,17 +14,20 @@ import '../services/config_service.dart';
 import '../services/hardware_keys.dart';
 import '../services/speech_config.dart';
 import '../services/emergency_service.dart';
+import '../services/voice_chat_logic.dart';
 
 class Chatscreen extends StatefulWidget {
   final String? imagePath;
   final String? prompt;
   final Map<String, dynamic>? locationData;
+  final bool autoStartVoice;
 
   const Chatscreen({
-    super.key, 
-    this.imagePath, 
-    this.prompt, 
+    super.key,
+    this.imagePath,
+    this.prompt,
     this.locationData,
+    this.autoStartVoice = false,
   });
 
   @override
@@ -50,10 +51,14 @@ class _ChatscreenState extends State<Chatscreen> {
   // ChatGPT-style voice chat: speak, it transcribes + sends, reads the answer
   // aloud, then re-opens the mic for the next turn until you toggle it off.
   bool _sttReady = false;
+  bool _sttSetupComplete = false;
   bool _voiceMode = false;
   bool _listening = false;
-  int _emptyTurns = 0; // consecutive mic turns that returned nothing
-  static const _maxEmptyTurns = 3;
+  bool _turnSubmitted = false;
+  String _voiceDraft = '';
+  String? _speechLocaleId;
+  Timer? _restartTimer;
+  Timer? _turnTimeout;
 
   ChatUser currentUser = ChatUser(id: "0", firstName: "User");
   ChatUser geminiUser = ChatUser(
@@ -89,62 +94,100 @@ class _ChatscreenState extends State<Chatscreen> {
     await _cacheService.initialize();
     await _setupTTS();
     await _setupStt();
+    if (widget.autoStartVoice && mounted) {
+      await _toggleVoiceMode();
+    }
   }
 
   Future<void> _setupStt() async {
-    await Permission.microphone.request();
+    final permission = await Permission.microphone.request();
+    if (!permission.isGranted) {
+      _sttSetupComplete = true;
+      if (mounted) setState(() {});
+      return;
+    }
     try {
       _sttReady = await _stt.initialize(
         onStatus: (s) {
           // A listen turn can end with only this callback (silence, no result).
           if (s == 'done' || s == 'notListening') {
             if (mounted) setState(() => _listening = false);
-            // Keep the ChatGPT-style loop alive: if we're still in voice mode
-            // and not mid-answer, re-open the mic for the next turn — but give
-            // up after a few empty turns so a dead recogniser can't spin the
-            // mic forever with no cue to the user.
-            if (_voiceMode && !_isLoading) {
-              _emptyTurns++;
-              if (_emptyTurns >= _maxEmptyTurns) {
-                if (mounted) setState(() => _voiceMode = false);
-                _stt.stop();
-                _speak(_localization.isTamil
-                    ? 'குரல் உள்ளீடு வேலை செய்யவில்லை. குரல் அரட்டை நிறுத்தப்பட்டது.'
-                    : "Voice input isn't working here. Voice chat is off.");
-                return;
-              }
-              Future.delayed(const Duration(milliseconds: 700), () {
+            // Android may end a recognition session after a pause. Re-open it
+            // while retaining the question until the user says "clear over".
+            if (_voiceMode && !_isLoading && !_turnSubmitted) {
+              _restartTimer?.cancel();
+              _restartTimer = Timer(const Duration(milliseconds: 1200), () {
                 if (_voiceMode && !_isLoading && !_listening) _listenOnce();
               });
             }
           }
         },
-        onError: (_) {
-          if (mounted) setState(() => _listening = false);
+        onError: (error) {
+          if (!_voiceMode) return;
+          final code = error.errorMsg;
+          if (code.contains('no_match') || code.contains('speech_timeout')) {
+            if (mounted) setState(() => _listening = false);
+            _restartTimer?.cancel();
+            _restartTimer = Timer(const Duration(milliseconds: 1200), () {
+              if (_voiceMode && !_isLoading && !_listening && !_turnSubmitted) {
+                _listenOnce();
+              }
+            });
+            return;
+          }
+          if (mounted) {
+            setState(() {
+              _listening = false;
+              _voiceMode = false;
+            });
+          }
+          HapticFeedback.heavyImpact();
+          _speak(_speechErrorMessage(code));
         },
       );
+      if (_sttReady) {
+        final locales = await _stt.locales();
+        final usEnglish = locales.where((locale) =>
+            locale.localeId.toLowerCase().replaceAll('-', '_') == 'en_us');
+        final english = locales
+            .where((locale) => locale.localeId.toLowerCase().startsWith('en'));
+        _speechLocaleId = usEnglish.isNotEmpty
+            ? usEnglish.first.localeId
+            : (english.isNotEmpty ? english.first.localeId : null);
+      }
     } catch (_) {
       _sttReady = false;
     }
+    _sttSetupComplete = true;
     if (mounted) setState(() {});
   }
 
-  void _toggleVoiceMode() {
+  Future<void> _toggleVoiceMode() async {
+    if (!_sttSetupComplete) {
+      await _speak('Voice input is still getting ready. Try again shortly.');
+      return;
+    }
     if (!_sttReady) {
-      _speak(_localization.isTamil
-          ? 'இந்த சாதனத்தில் குரல் உள்ளீடு கிடைக்கவில்லை.'
-          : 'Voice input is not available on this device.');
+      final permission = await Permission.microphone.status;
+      await _speak(permission.isPermanentlyDenied
+          ? 'Microphone permission is blocked. Enable it in Android app settings, then try again.'
+          : permission.isDenied
+              ? 'Microphone permission is required for voice chat. Allow it, then try again.'
+              : 'Voice recognition is not available on this phone. You can still type a message.');
       return;
     }
     setState(() => _voiceMode = !_voiceMode);
     HapticFeedback.mediumImpact();
     if (_voiceMode) {
-      _emptyTurns = 0;
-      _speak(_localization.isTamil ? 'குரல் அரட்டை இயக்கத்தில்.' : 'Voice chat on.');
-      _listenOnce();
+      await _speak(
+          'Voice chat on. Speak after the vibration. Say clear over when your question is finished. Tap anywhere to cancel.');
+      await _beginNextVoiceTurn();
     } else {
-      _stt.stop();
-      _speak(_localization.isTamil ? 'குரல் அரட்டை நிறுத்தப்பட்டது.' : 'Voice chat off.');
+      _restartTimer?.cancel();
+      _turnTimeout?.cancel();
+      _voiceDraft = '';
+      await _stt.stop();
+      await _speak('Voice chat off.');
     }
   }
 
@@ -155,28 +198,109 @@ class _ChatscreenState extends State<Chatscreen> {
     HapticFeedback.lightImpact();
     await _stt.listen(
       onResult: (r) {
-        if (!r.finalResult) return;
-        final text = r.recognizedWords.trim();
-        setState(() => _listening = false);
-        if (text.isEmpty) {
-          // onStatus('notListening') re-opens the mic; just acknowledge here.
-          _speak(_localization.isTamil ? 'கேட்கவில்லை.' : "Didn't catch that.");
+        if (_turnSubmitted) return;
+        final segment = r.recognizedWords.trim();
+        if (segment.isEmpty) return;
+        final combined = [_voiceDraft, segment]
+            .where((part) => part.isNotEmpty)
+            .join(' ')
+            .trim();
+        final utterance = parseVoiceChatUtterance(combined);
+        if (!utterance.isComplete && !r.finalResult) return;
+        if (!utterance.isComplete) {
+          _voiceDraft = combined;
           return;
         }
-        _emptyTurns = 0; // a real transcription — the recogniser works
+        _turnSubmitted = true;
+        _turnTimeout?.cancel();
+        _restartTimer?.cancel();
+        _stt.stop();
+        if (mounted) setState(() => _listening = false);
+        final text = utterance.text;
+        if (text.isEmpty) {
+          _turnSubmitted = false;
+          _voiceDraft = '';
+          _startTurnTimeout();
+          _speak('Please say your question, then say clear over.').then((_) {
+            if (_voiceMode && mounted) _listenOnce();
+          });
+          return;
+        }
+        final control = parseVoiceChatControl(text);
+        if (control == VoiceChatControl.stop) {
+          setState(() => _voiceMode = false);
+          _turnTimeout?.cancel();
+          _stt.stop();
+          _speak('Voice chat off.');
+          return;
+        }
+        if (control == VoiceChatControl.repeat) {
+          if (_lastAIResponse == null) {
+            _speak('There is no assistant answer to repeat yet.').then((_) {
+              if (_voiceMode && mounted) _beginNextVoiceTurn();
+            });
+            return;
+          }
+          _speakLastResponse().then((_) {
+            if (_voiceMode && mounted) _beginNextVoiceTurn();
+          });
+          return;
+        }
+        HapticFeedback.mediumImpact();
+        _voiceDraft = '';
         _sendMessage(ChatMessage(
           user: currentUser,
           createdAt: DateTime.now(),
           text: text,
         ));
       },
-      listenFor: const Duration(seconds: 20),
-      pauseFor: const Duration(seconds: 3),
       listenOptions: stt.SpeechListenOptions(
         listenMode: stt.ListenMode.dictation,
-        partialResults: false,
+        partialResults: true,
+        onDevice: false,
+        listenFor: const Duration(seconds: 20),
+        pauseFor: const Duration(seconds: 3),
+        localeId: _speechLocaleId,
       ),
     );
+  }
+
+  void _startTurnTimeout() {
+    _turnTimeout?.cancel();
+    _turnTimeout = Timer(const Duration(minutes: 2), () async {
+      if (!_voiceMode || _isLoading || _turnSubmitted) return;
+      _restartTimer?.cancel();
+      await _stt.stop();
+      if (mounted) {
+        setState(() {
+          _voiceMode = false;
+          _listening = false;
+        });
+      }
+      await _speak(
+          'I did not hear clear over within two minutes. Voice chat is off. Tap the microphone to try again.');
+    });
+  }
+
+  Future<void> _beginNextVoiceTurn() async {
+    if (!_voiceMode || !mounted) return;
+    _voiceDraft = '';
+    _turnSubmitted = false;
+    _startTurnTimeout();
+    await _listenOnce();
+  }
+
+  String _speechErrorMessage(String code) {
+    if (code.contains('permission')) {
+      return 'Microphone permission was denied. Enable it in Android app settings, then try again.';
+    }
+    if (code.contains('network')) {
+      return 'Voice recognition could not connect. Check your internet, or type your message.';
+    }
+    if (code.contains('no_match') || code.contains('speech_timeout')) {
+      return "I didn't hear a clear question. Voice chat is off. Tap the microphone to try again.";
+    }
+    return 'Voice recognition stopped unexpectedly. Tap the microphone to try again.';
   }
 
   Future<void> _speak(String text) async {
@@ -197,7 +321,7 @@ class _ChatscreenState extends State<Chatscreen> {
   @override
   Widget build(BuildContext context) {
     final isTamil = _localization.isTamil;
-    
+
     return Scaffold(
       appBar: AppBar(
         centerTitle: true,
@@ -209,7 +333,8 @@ class _ChatscreenState extends State<Chatscreen> {
               onPressed: _showLocationDetails,
               tooltip: _localization.tr('location_details'),
             ),
-          if (_configService.appConfig.features.ttsEnabled && _lastAIResponse != null)
+          if (_configService.appConfig.features.ttsEnabled &&
+              _lastAIResponse != null)
             IconButton(
               icon: const Icon(Icons.volume_up),
               onPressed: _speakLastResponse,
@@ -233,7 +358,9 @@ class _ChatscreenState extends State<Chatscreen> {
       child: Semantics(
         liveRegion: true,
         button: true,
-        label: isTamil ? 'கேட்கிறது. நிறுத்த தட்டவும்.' : 'Listening. Tap to stop.',
+        label: isTamil
+            ? 'கேட்கிறது. நிறுத்த தட்டவும்.'
+            : 'Listening. Tap to stop.',
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: _toggleVoiceMode,
@@ -269,7 +396,7 @@ class _ChatscreenState extends State<Chatscreen> {
   void _showLocationDetails() {
     final data = widget.locationData!;
     final isTamil = _localization.isTamil;
-    
+
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.grey[900],
@@ -284,14 +411,22 @@ class _ChatscreenState extends State<Chatscreen> {
           children: [
             Text(
               _localization.tr('image_location_data'),
-              style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 20),
-            _buildInfoRow(_localization.tr('address'), data['address'] ?? 'N/A'),
-            _buildInfoRow(_localization.tr('coordinates'), '${data['latitude']?.toStringAsFixed(6)}, ${data['longitude']?.toStringAsFixed(6)}'),
-            _buildInfoRow(_localization.tr('altitude'), '${data['altitude']?.toStringAsFixed(1)} m'),
-            _buildInfoRow(_localization.tr('gps_accuracy'), '${data['accuracy']?.toStringAsFixed(1)} m'),
-            _buildInfoRow(_localization.tr('timestamp'), data['timestamp'] ?? 'N/A'),
+            _buildInfoRow(
+                _localization.tr('address'), data['address'] ?? 'N/A'),
+            _buildInfoRow(_localization.tr('coordinates'),
+                '${data['latitude']?.toStringAsFixed(6)}, ${data['longitude']?.toStringAsFixed(6)}'),
+            _buildInfoRow(_localization.tr('altitude'),
+                '${data['altitude']?.toStringAsFixed(1)} m'),
+            _buildInfoRow(_localization.tr('gps_accuracy'),
+                '${data['accuracy']?.toStringAsFixed(1)} m'),
+            _buildInfoRow(
+                _localization.tr('timestamp'), data['timestamp'] ?? 'N/A'),
           ],
         ),
       ),
@@ -376,18 +511,18 @@ class _ChatscreenState extends State<Chatscreen> {
         _configService.appConfig.features.vibrationFeedback) {
       HapticFeedback.lightImpact();
     }
-    
+
     setState(() {
       messages = [chatMessage, ...messages];
       _isLoading = true;
     });
-    
+
     _getAIResponse(chatMessage);
   }
 
   void _sendMediaMessage(String imagePath) {
     _computeImageHash(imagePath);
-    
+
     final chatMessage = ChatMessage(
       user: currentUser,
       createdAt: DateTime.now(),
@@ -429,7 +564,7 @@ class _ChatscreenState extends State<Chatscreen> {
 
       String question = chatMessage.text;
       List<Uint8List>? images;
-      
+
       if (chatMessage.medias?.isNotEmpty ?? false) {
         final file = File(chatMessage.medias!.first.url);
         if (file.existsSync()) {
@@ -456,8 +591,8 @@ class _ChatscreenState extends State<Chatscreen> {
         }
         _handleResponse(response);
       } else {
-        _handleResponse(
-            "I couldn't reach the assistant. Check the internet connection and try again.");
+        _handleResponse(_aiService.lastFailureMessage ??
+            'The assistant did not return a description. Try another photo.');
       }
     } catch (e) {
       debugPrint('chatscreen generateResponse threw: $e');
@@ -469,9 +604,8 @@ class _ChatscreenState extends State<Chatscreen> {
   void _handleResponse(String response, {bool fromCache = false}) {
     if (!mounted) return;
 
-    final displayResponse = fromCache 
-        ? '${_localization.tr('offline_mode')}: $response' 
-        : response;
+    final displayResponse =
+        fromCache ? '${_localization.tr('offline_mode')}: $response' : response;
 
     if (messages.isNotEmpty && messages.first.user == geminiUser) {
       final lastMessage = messages.removeAt(0);
@@ -504,10 +638,10 @@ class _ChatscreenState extends State<Chatscreen> {
     if (_configService.initialized &&
         _configService.appConfig.features.ttsEnabled) {
       _speakLastResponse().then((_) {
-        if (_voiceMode && mounted) _listenOnce();
+        if (_voiceMode && mounted) _beginNextVoiceTurn();
       });
     } else if (_voiceMode && mounted) {
-      _listenOnce();
+      _beginNextVoiceTurn();
     }
   }
 
@@ -521,6 +655,8 @@ class _ChatscreenState extends State<Chatscreen> {
   @override
   void dispose() {
     _keySub?.cancel();
+    _restartTimer?.cancel();
+    _turnTimeout?.cancel();
     _voiceMode = false;
     _stt.stop();
     _stt.cancel();

@@ -1,0 +1,27 @@
+1
+00:00:00,000 --> 00:00:10,000
+Logic Legends — Accessible understanding through a phone camera
+
+2
+00:00:10,000 --> 00:00:24,000
+Printed medicine labels, bills, and notices often force blind people to depend on someone else for private, everyday information.
+
+3
+00:00:24,000 --> 00:00:38,000
+Logic Legends uses large, location-independent controls: tap or Volume Up to capture, swipe to change mode, and Volume Down to repeat.
+
+4
+00:00:38,000 --> 00:00:54,000
+Read & Explain first uses on-device OCR to speak captured text, then uses a cloud prototype to explain it in plain language.
+
+5
+00:00:54,000 --> 00:01:08,000
+Explore sends a non-sensitive camera image to Gemini and speaks a concise scene description. Failures include an audible recovery step.
+
+6
+00:01:08,000 --> 00:01:20,000
+Voice Chat is an experimental third swipe mode. It accepts spoken questions and reads the answer aloud.
+
+7
+00:01:20,000 --> 00:01:32,000
+Logic Legends is designed for comprehension, confidence, and recovery without requiring the user to see the screen.

@@ -5,9 +5,9 @@
     "build": "chennai-hackathon-2026"
   },
   "features": {
-    "on_device_llm": true,
+    "on_device_llm": false,
     "offline_mode": true,
-    "tamil_support": true,
+    "tamil_support": false,
     "gps_enabled": true,
     "tts_enabled": true,
     "vibration_feedback": true,

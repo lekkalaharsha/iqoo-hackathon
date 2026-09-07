@@ -1,4 +1,4 @@
-# Next-session tasks
+﻿# Next-session tasks
 
 Ordered. Commit per fix (`git -c core.autocrlf=false`). See `HANDOFF.md` for
 context, `DEMO_FEATURES.md` for the demo script.
@@ -7,7 +7,7 @@ context, `DEMO_FEATURES.md` for the demo script.
 
 - [ ] **OCR a real medicine strip** (foil, ~6pt, curved) and a printed notice.
       Confirm the slow-path `explain()` fires and the spoken answer names the
-      dose limit / expiry / required action. If OCR can't read foil print,
+      only details present in the captured text; missing dose/expiry/action details must not be invented. If OCR can't read foil print,
       the medicine demo needs a different prop — decide now.
 - [ ] **Emergency, full re-test** (commit `1beafa8` reworked it):
   - set contact to a safe 2nd number in Settings

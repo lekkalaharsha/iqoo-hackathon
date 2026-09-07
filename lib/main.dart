@@ -1,7 +1,5 @@
 import 'package:logic_legends/screens/homepage.dart';
 import 'package:flutter/material.dart';
-import 'package:logic_legends/screens/constapi.dart';
-import 'package:flutter_gemini/flutter_gemini.dart';
 import 'package:camera/camera.dart';
 
 void main() async {
@@ -14,12 +12,6 @@ void main() async {
   } catch (e) {
     print("Error initializing camera: $e");
     firstCamera = null;
-  }
-
-  try {
-    Gemini.init(apiKey: GEMINI_API_KEY);
-  } catch (e) {
-    print("Error initializing Gemini API: $e");
   }
 
   runApp(MyApp(camera: firstCamera));

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:permission_handler/permission_handler.dart';
 import 'package:sensors_plus/sensors_plus.dart';
@@ -111,10 +112,10 @@ class VoiceAssistantService {
       
       // Response control
       (RegExp(r'(read|speak|say).*(last|previous|response|answer)', caseSensitive: false), VoiceCommandType.readLastResponse),
-      (RegExp(r'(repeat|again).*(last|previous|response|answer)', caseSensitive: false), VoiceCommandType.repeatLastResponse),
+      (RegExp(r'\b(repeat|again|say again)\b', caseSensitive: false), VoiceCommandType.repeatLastResponse),
       
       // Mode switching
-      (RegExp(r'(switch|change|mode).*(explore|food|text|document)', caseSensitive: false), VoiceCommandType.switchMode),
+      (RegExp(r'(switch|change|mode).*(explore|text|document|read and explain)', caseSensitive: false), VoiceCommandType.switchMode),
       
       // Features
       (RegExp(r'(turn|toggle|enable|disable).*(gps|location|tts|speech|vibration|browsing|offline)', caseSensitive: false), VoiceCommandType.toggleFeature),
@@ -134,51 +135,7 @@ class VoiceAssistantService {
       // command above — settings, help, emergency — must get first refusal.
       (RegExp(r'\b(open|launch|start)\b\s+(.+)', caseSensitive: false), VoiceCommandType.openApp),
     ],
-    'ta': [
-      // Capture image - Tamil
-      (RegExp(r'(எடுத்து|பிடி|புகைப்படம்|திரைப்படம்)', caseSensitive: false), VoiceCommandType.captureImage),
-      (RegExp(r'(என்ன|விவரி).*(இங்கு|சுற்று|தொடர்)', caseSensitive: false), VoiceCommandType.describeScene),
-      
-      // Text reading
-      (RegExp(r'(வாசி|ச캔|எடுத்து).*(எழுத்து|சொற்கள்|எழுதிய)', caseSensitive: false), VoiceCommandType.readText),
-      
-      // Food
-      (RegExp(r'(அடையாளம்|என்ன|அறிதல்).*(உணவு|சாப்பாடு|பளவு)', caseSensitive: false), VoiceCommandType.identifyFood),
-      (RegExp(r'(நீர்ப்பு|கலாரி|கறைகள்|ஆலர்ஜி).*(உணவு|சாப்பாடு)', caseSensitive: false), VoiceCommandType.identifyFood),
-      
-      // Document
-      (RegExp(r'(விவரி|வாசி|சக்கன்|சுருக்கம்).*(ஆவணம்|காகிதம்|கத்து|பில்)', caseSensitive: false), VoiceCommandType.analyzeDocument),
-      
-      // Location
-      (RegExp(r'(எங்கே|இடம்|முகவர்|இடம்).*(நான்|இங்கு)', caseSensitive: false), VoiceCommandType.getLocation),
-      (RegExp(r'(நாவிகேட்|திசை|मार்க்|செல்).*(.*?)', caseSensitive: false), VoiceCommandType.getDirections),
-      
-      // Web search
-      (RegExp(r'(தேடு|பாரு|காண்|கூகிள்).*(.*?)', caseSensitive: false), VoiceCommandType.searchWeb),
-      (RegExp(r'(அத்யதன்|தற்போதை|செய்தி|வானிலை|விலை).*(.*?)', caseSensitive: false), VoiceCommandType.searchWeb),
-      
-      // Response control
-      (RegExp(r'(வாசி|பேசு|சொல்).*(கடைசி|முன்னடி|பதில்|உத்தரவு)', caseSensitive: false), VoiceCommandType.readLastResponse),
-      (RegExp(r'(மறுபடியும்|அதே).*(கடைசி|முன்னடி|பதில்|உத்தரவு)', caseSensitive: false), VoiceCommandType.repeatLastResponse),
-      
-      // Mode switching
-      (RegExp(r'(மாற்று|மேன்|மோடு).*(ஆராய்வு|உணவு|உரை|ஆவணம்)', caseSensitive: false), VoiceCommandType.switchMode),
-      
-      // Features
-      (RegExp(r'(செய்|மேன்|இயக்கு|நிறுத்து).*(GPS|இடம்|TTS|பேச்சு|நடை|உலாவல்|ஆஃப்லைன்)', caseSensitive: false), VoiceCommandType.toggleFeature),
-      
-      // Settings
-      (RegExp(r'(திற|செல்|காண்).*(அமைப்பு|நிலைமை|மெனு)', caseSensitive: false), VoiceCommandType.openSettings),
-      
-      // Help
-      (RegExp(r'(உதவி|நீங்கள் என்ன செய்யலாம்|குறிப்புகள்|எப்படி பயன்படுத்த)', caseSensitive: false), VoiceCommandType.help),
-      
-      // Emergency — narrow (see 'en' note). Dropped உதவி ("help"), ஆபத்து.
-      (RegExp(r'\b(அவசரம்|அவசர|SOS)\b', caseSensitive: false), VoiceCommandType.emergency),
 
-      // Open an installed app by name — LAST, broad pattern (see 'en' note).
-      (RegExp(r'\b(திற|தொடங்கு)\b\s+(.+)', caseSensitive: false), VoiceCommandType.openApp),
-    ],
   };
 
   Future<void> initialize() async {
@@ -346,7 +303,7 @@ class VoiceAssistantService {
     if (_isProcessing) return;
     _isProcessing = true;
 
-    final command = _parseCommand(text);
+    final command = parseCommand(text);
     onCommandRecognized?.call(command);
     
     _executeCommand(command).then((_) {
@@ -363,8 +320,9 @@ class VoiceAssistantService {
     });
   }
 
-  VoiceCommand _parseCommand(String text) {
-    final patterns = _commandPatterns[_localization.currentLocale] ?? _commandPatterns['en']!;
+  @visibleForTesting
+  VoiceCommand parseCommand(String text) {
+    final patterns = _commandPatterns['en']!;
     
     for (final entry in patterns) {
       final match = entry.$1.firstMatch(text);
@@ -394,10 +352,7 @@ class VoiceAssistantService {
 
     switch (type) {
       case VoiceCommandType.switchMode:
-        if (lowerText.contains('explore') || lowerText.contains('ஆராய்வு')) params['mode'] = 0;
-        else if (lowerText.contains('food') || lowerText.contains('உணவு')) params['mode'] = 1;
-        else if (lowerText.contains('text') || lowerText.contains('உரை')) params['mode'] = 2;
-        else if (lowerText.contains('document') || lowerText.contains('ஆவணம்')) params['mode'] = 3;
+        params['mode'] = lowerText.contains('explore') ? 0 : 1;
         break;
       case VoiceCommandType.toggleFeature:
         if (lowerText.contains('gps') || lowerText.contains('location') || lowerText.contains('இடம்')) params['feature'] = 'gps_enabled';
@@ -432,13 +387,13 @@ class VoiceAssistantService {
           await _executeCaptureCommand(command.type == VoiceCommandType.describeScene);
           break;
         case VoiceCommandType.readText:
-          await _executeCaptureCommand(false, mode: 2); // Text mode
+          await _executeCaptureCommand(false, mode: 1); // Read & Explain
           break;
         case VoiceCommandType.identifyFood:
-          await _executeCaptureCommand(false, mode: 1); // Food mode
+          await _executeCaptureCommand(false, mode: 0); // Explore
           break;
         case VoiceCommandType.analyzeDocument:
-          await _executeCaptureCommand(false, mode: 3); // Document mode
+          await _executeCaptureCommand(false, mode: 1); // Read & Explain
           break;
         case VoiceCommandType.getLocation:
           await _announceLocation();
@@ -529,13 +484,10 @@ class VoiceAssistantService {
   }
 
   void _switchMode(int? mode) {
-    if (mode != null && mode >= 0 && mode <= 3) {
-      const modeNames = ['Explore', 'Food Labels', 'Text', 'Documents'];
-      const modeNamesTa = ['ஆராய்வு', 'உணவு லேபிள்கள்', 'உரை', 'ஆவணங்கள்'];
-      final name = _localization.isTamil ? modeNamesTa[mode] : modeNames[mode];
-      _announce('Switching to $name mode');
-      onStatusUpdate?.call('switch_mode:$mode');
-    }
+    if (mode == null || mode < 0 || mode > 1) return;
+    const names = ['Explore', 'Read & Explain'];
+    _announce('Switching to ${names[mode]} mode');
+    onStatusUpdate?.call('switch_mode:$mode');
   }
 
   void _toggleFeature(String? feature, bool? enable) {

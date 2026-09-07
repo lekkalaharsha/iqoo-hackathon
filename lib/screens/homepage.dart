@@ -35,9 +35,11 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   CameraController? _cameraController;
   bool _isCameraInitialized = false;
-  int _selectedIndex = 0;
+  // Reading printed text is the reliable local path and the app's primary
+  // purpose. Explore requires separately configured cloud image AI.
+  int _selectedIndex = 1;
   bool _showCameraError = false;
-  
+
   final GPSService _gpsService = GPSService();
   final ConfigService _configService = ConfigService();
   final LocalizationService _localization = LocalizationService();
@@ -84,7 +86,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         return;
       }
       if (k == 'volume_up') {
-        if (!_isProcessing) _takePicture();
+        if (!_isProcessing) {
+          if (_selectedIndex == 2) {
+            _openVoiceChat();
+          } else {
+            _takePicture();
+          }
+        }
       } else if (k == 'volume_down') {
         _repeatSpoken();
       }
@@ -150,7 +158,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (mounted) setState(() => _lastTranscription = text);
     };
     _voiceAssistant.onListeningStateChange = (listening) {
-      if (mounted) setState(() => _voiceStatus = listening ? 'Listening...' : 'Wake word active');
+      if (mounted)
+        setState(() =>
+            _voiceStatus = listening ? 'Listening...' : 'Wake word active');
     };
     _voiceAssistant.onStatusUpdate = (status) {
       _handleVoiceStatus(status);
@@ -165,16 +175,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final mode = int.tryParse(status.split(':')[1]) ?? 0;
       _captureImageByVoice(mode);
     } else if (status.startsWith('switch_mode:')) {
-      final mode = (int.tryParse(status.split(':')[1]) ?? 0).clamp(0, _modeCount - 1);
+      final mode =
+          (int.tryParse(status.split(':')[1]) ?? 0).clamp(0, _modeCount - 1);
       setState(() => _selectedIndex = mode);
       _announceModeChange(mode);
     } else if (status == 'open_settings') {
-      Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()));
+      Navigator.push(
+          context, MaterialPageRoute(builder: (_) => const SettingsScreen()));
     } else if (status == 'emergency') {
       _triggerEmergencySOS();
+    } else if (status == 'repeat_response') {
+      _repeatSpoken();
     } else if (status.startsWith('directions:') ||
         status.startsWith('web_search:') ||
-        status == 'repeat_response' ||
         status.startsWith('ai_query:')) {
       // These voice outcomes have no working destination. A snackbar is
       // invisible to a blind user — say so out loud instead of silently.
@@ -183,19 +196,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _captureImageByVoice(int mode) async {
-    if (!(_isCameraInitialized && _cameraController != null && _cameraController!.value.isInitialized)) {
+    if (!(_isCameraInitialized &&
+        _cameraController != null &&
+        _cameraController!.value.isInitialized)) {
       _voiceAssistant.announce('Camera not ready');
       return;
     }
-    
+
     setState(() => _selectedIndex = mode);
     await _takePicture();
   }
 
   void _announceModeChange(int mode) {
-    const modeNames = ['Explore', 'Food Labels', 'Text', 'Documents'];
-    const modeNamesTa = ['ஆராய்வு', 'உணவு லேபிள்கள்', 'உரை', 'ஆவணங்கள்'];
-    final name = _localization.isTamil ? modeNamesTa[mode] : modeNames[mode];
+    const modeNames = ['Explore', 'Read and Explain'];
+    final name = modeNames[mode.clamp(0, _modeCount - 1)];
     _voiceAssistant.announce('Switched to $name mode');
   }
 
@@ -205,7 +219,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _triggerEmergencySOS() async {
-    if (_emergency.isCountingDown) return; // already armed — ignore repeat presses
+    if (_emergency.isCountingDown)
+      return; // already armed — ignore repeat presses
     HapticFeedback.heavyImpact();
     // No contact set: trigger() just speaks the hint. Don't show the red
     // countdown overlay — nothing ticks it down and it would stick on "5".
@@ -312,8 +327,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       await SpeechConfig.apply(_tts);
       final msg = _localization.isTamil
           ? 'AI அனைவருக்கும் தயார். படம் எடுக்க எங்கும் தட்டவும்.'
-          : 'A I For All ready. Tap anywhere to take a photo. '
-              'Swipe left or right to change mode.';
+          : 'A I For All ready. Read and Explain mode. Point at printed text '
+              'and tap anywhere to read it. Swipe left or right to change mode.';
       SpokenText.last = msg;
       await _tts.speak(msg);
     } catch (_) {}
@@ -330,10 +345,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Future<void> _initializeGPS() async {
     if (!_configService.appConfig.features.gpsEnabled) return;
-    
+
     final enabled = await Geolocator.isLocationServiceEnabled();
     setState(() => _isGPSEnabled = enabled);
-    
+
     if (!enabled) return;
 
     final hasPermission = await _gpsService.requestPermission();
@@ -349,7 +364,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
 
       _positionSubscription?.cancel();
-      _positionSubscription = _gpsService.getPositionStream().listen((position) {
+      _positionSubscription =
+          _gpsService.getPositionStream().listen((position) {
         if (mounted) {
           setState(() {
             _currentPosition = position;
@@ -408,8 +424,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (_cameraController == null || !_cameraController!.value.isInitialized) return;
-    if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
+    if (_cameraController == null || !_cameraController!.value.isInitialized)
+      return;
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused) {
       _suspendPreview();
       if (_voiceAssistantActive) _voiceAssistant.stopListening();
     } else if (state == AppLifecycleState.resumed) {
@@ -433,25 +451,54 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void _onItemTapped(int index) {
-    if (_configService.appConfig.features.vibrationFeedback) HapticFeedback.lightImpact();
+    if (_configService.appConfig.features.vibrationFeedback)
+      HapticFeedback.lightImpact();
     _voiceAssistant.announce(_getModeName(index));
     setState(() {
       _selectedIndex = index;
     });
   }
 
-  // Two modes only (DEMO_FEATURES): 0 = Explore (scene -> chat/VLM),
-  // 1 = Read & Explain (text -> OCR + plain-language explanation).
-  static const _modeCount = 2;
+  // Swipe cycle: scene description, printed-text reading, and voice chat.
+  static const _modeCount = 3;
 
   String _getModeName(int index) {
     return _localization.isTamil
-        ? ['ஆராய்வு', 'படித்து விளக்கு'][index.clamp(0, _modeCount - 1)]
-        : ['Explore', 'Read & Explain'][index.clamp(0, _modeCount - 1)];
+        ? [
+            'ஆராய்வு',
+            'படித்து விளக்கு',
+            'குரல் அரட்டை'
+          ][index.clamp(0, _modeCount - 1)]
+        : [
+            'Explore',
+            'Read & Explain',
+            'Voice Chat'
+          ][index.clamp(0, _modeCount - 1)];
   }
 
-  String _modeInstruction(bool isTamil) =>
-      isTamil ? 'தட்டவும் · ஸ்வைப் செய்து மாற்றவும்' : 'Tap anywhere · swipe to switch';
+  String _modeInstruction(bool isTamil) {
+    if (_selectedIndex == 2) {
+      return isTamil
+          ? 'குரல் அரட்டையைத் தொடங்க தட்டவும்'
+          : 'Tap to start listening · swipe to switch';
+    }
+    return isTamil
+        ? 'தட்டவும் · ஸ்வைப் செய்து மாற்றவும்'
+        : 'Tap anywhere · swipe to switch';
+  }
+
+  Future<void> _openVoiceChat() async {
+    if (_isProcessing || _emergency.isCountingDown || !mounted) return;
+    HapticFeedback.mediumImpact();
+    _suspendPreview();
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const Chatscreen(autoStartVoice: true),
+      ),
+    );
+    _resumePreview();
+  }
 
   /// Read & Explain only: double-tap the preview to speak a question, then
   /// capture and answer *that* instead of the mode's default prompt.
@@ -474,8 +521,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Future<void> _takePicture({String? question}) async {
     if (_isProcessing) return;
+    if (_selectedIndex == 2) {
+      await _openVoiceChat();
+      return;
+    }
 
-    if (!(_isCameraInitialized && _cameraController != null && _cameraController!.value.isInitialized)) {
+    if (!(_isCameraInitialized &&
+        _cameraController != null &&
+        _cameraController!.value.isInitialized)) {
       _showSnackBar(_localization.tr('camera_not_initialized'));
       return;
     }
@@ -488,8 +541,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ? question.trim()
           : _buildPrompt();
       Map<String, dynamic>? locationData;
-      
-      if (_currentPosition != null && _configService.appConfig.features.gpsEnabled) {
+
+      if (_currentPosition != null &&
+          _configService.appConfig.features.gpsEnabled) {
         locationData = await _gpsService.getLocationData();
       }
 
@@ -543,7 +597,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     // Only Explore (index 0) uses this prompt now — Read & Explain runs its own
     // OCR + explanation pipeline and ignores it.
     String prompt = _configService.getPrompt('explore', isTamil: isTamil);
-    
+
     if (_currentPosition != null) {
       final locationContext = _configService.getLocationContext(
         isTamil: isTamil,
@@ -554,7 +608,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       );
       prompt = '$prompt. $locationContext';
     }
-    
+
     return prompt;
   }
 
@@ -584,7 +638,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     if (_voiceAssistantActive) {
       await _voiceAssistant.startListening();
-      _voiceAssistant.announce('Voice assistant activated. Say "Hey Assistant" to begin.');
+      _voiceAssistant
+          .announce('Voice assistant activated. Say "Hey Assistant" to begin.');
     } else {
       await _voiceAssistant.stopListening();
       _voiceAssistant.announce('Voice assistant deactivated');
@@ -592,7 +647,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void _onVoiceCommand(VoiceCommand command) {
-    _showSnackBar('Command: ${command.type.name} (${(command.confidence * 100).toInt()}%)');
+    _showSnackBar(
+        'Command: ${command.type.name} (${(command.confidence * 100).toInt()}%)');
   }
 
   @override
@@ -613,13 +669,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         data: MediaQuery.of(context).copyWith(
           // Respect the OS text-size slider, but never below the app's floor
           // (1.0, or 1.5 with Large Text on). Low-vision users lean on both.
-          textScaler: MediaQuery.textScalerOf(context)
-              .clamp(minScaleFactor: textScale),
+          textScaler:
+              MediaQuery.textScalerOf(context).clamp(minScaleFactor: textScale),
           boldText: _highContrast,
           highContrast: _highContrast,
         ),
         child: Semantics(
-          label: isTamil ? 'Logic Legends मुख் ஸ்க்ரீன்' : 'Logic Legends Main Screen',
+          label: isTamil
+              ? 'Logic Legends मुख் ஸ்க்ரீன்'
+              : 'Logic Legends Main Screen',
           // No bottom bar, no FAB: the whole preview is the shutter (tap), and a
           // horizontal swipe toggles the two modes. Nothing to find by sight.
           child: Scaffold(
@@ -646,7 +704,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       title: Semantics(
         header: true,
         liveRegion: true,
-        label: '${_getModeName(_selectedIndex)} mode. ${_modeInstruction(isTamil)}',
+        label:
+            '${_getModeName(_selectedIndex)} mode. ${_modeInstruction(isTamil)}',
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -701,7 +760,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       button: true,
       label: isTamil ? 'அணுகல் அமைப்புகள்' : 'Accessibility Settings',
       child: PopupMenuButton<String>(
-        icon: Icon(Icons.accessibility_new, color: _highContrast || _largeText ? Colors.amber : Colors.grey),
+        icon: Icon(Icons.accessibility_new,
+            color: _highContrast || _largeText ? Colors.amber : Colors.grey),
         tooltip: 'Accessibility Options',
         onSelected: (value) {
           setState(() {
@@ -726,7 +786,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             value: 'high_contrast',
             child: Row(
               children: [
-                Icon(_highContrast ? Icons.check_box : Icons.check_box_outline_blank, color: _highContrast ? Colors.green : null),
+                Icon(
+                    _highContrast
+                        ? Icons.check_box
+                        : Icons.check_box_outline_blank,
+                    color: _highContrast ? Colors.green : null),
                 const SizedBox(width: 8),
                 Text(isTamil ? 'உயர் துவிர்ச்சி' : 'High Contrast'),
               ],
@@ -736,7 +800,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             value: 'large_text',
             child: Row(
               children: [
-                Icon(_largeText ? Icons.check_box : Icons.check_box_outline_blank, color: _largeText ? Colors.green : null),
+                Icon(
+                    _largeText
+                        ? Icons.check_box
+                        : Icons.check_box_outline_blank,
+                    color: _largeText ? Colors.green : null),
                 const SizedBox(width: 8),
                 Text(isTamil ? 'மேல் வலியான உரை' : 'Large Text'),
               ],
@@ -746,7 +814,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             value: 'voice_assistant',
             child: Row(
               children: [
-                Icon(_voiceAssistantActive ? Icons.mic : Icons.mic_none, color: _voiceAssistantActive ? Colors.green : null),
+                Icon(_voiceAssistantActive ? Icons.mic : Icons.mic_none,
+                    color: _voiceAssistantActive ? Colors.green : null),
                 const SizedBox(width: 8),
                 Text(isTamil ? 'குரல் உதவியாளர்' : 'Voice Assistant'),
               ],
@@ -766,7 +835,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           color: isOnline ? Colors.green : Colors.red,
         ),
         onPressed: null,
-        tooltip: isOnline ? _localization.tr('online_mode') : _localization.tr('offline_mode'),
+        tooltip: isOnline
+            ? _localization.tr('online_mode')
+            : _localization.tr('offline_mode'),
       ),
     );
   }
@@ -800,15 +871,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (accuracy <= _configService.appConfig.gps.accuracyThresholdHigh) {
         indicatorColor = Colors.green;
         icon = Icons.gps_fixed;
-        tooltip = '${_localization.tr('high_accuracy')}: ${accuracy.toStringAsFixed(1)}m';
-      } else if (accuracy <= _configService.appConfig.gps.accuracyThresholdMedium) {
+        tooltip =
+            '${_localization.tr('high_accuracy')}: ${accuracy.toStringAsFixed(1)}m';
+      } else if (accuracy <=
+          _configService.appConfig.gps.accuracyThresholdMedium) {
         indicatorColor = Colors.yellow;
         icon = Icons.gps_fixed;
-        tooltip = '${_localization.tr('medium_accuracy')}: ${accuracy.toStringAsFixed(1)}m';
+        tooltip =
+            '${_localization.tr('medium_accuracy')}: ${accuracy.toStringAsFixed(1)}m';
       } else {
         indicatorColor = Colors.orange;
         icon = Icons.gps_fixed;
-        tooltip = '${_localization.tr('low_accuracy')}: ${accuracy.toStringAsFixed(1)}m';
+        tooltip =
+            '${_localization.tr('low_accuracy')}: ${accuracy.toStringAsFixed(1)}m';
       }
     }
 
@@ -828,11 +903,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (!_initialized) {
       return const Center(child: CircularProgressIndicator());
     }
-    
+
     if (_showCameraError) {
       return _buildCameraErrorView(isTamil);
     }
-    
+
     if (!_isCameraInitialized) {
       return Center(
         child: Column(
@@ -857,7 +932,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           button: true,
           label: isTamil
               ? 'படம் எடுக்க எங்கும் தட்டவும்'
-              : 'Tap anywhere to take a photo',
+              : (_selectedIndex == 2
+                  ? 'Tap anywhere to start Voice Chat'
+                  : 'Tap anywhere to take a photo'),
           hint: isTamil
               ? 'அவசரத்திற்கு நீண்ட நேரம் அழுத்தவும். ஸ்வைப் செய்து மோடு மாற்றவும்.'
               : (_selectedIndex == 1
@@ -869,7 +946,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               if (_emergency.isCountingDown) {
                 _cancelEmergency();
               } else if (!_isProcessing) {
-                _takePicture();
+                if (_selectedIndex == 2) {
+                  _openVoiceChat();
+                } else {
+                  _takePicture();
+                }
               }
             },
             // Double-tap = speak a question first — ONLY in Read & Explain
@@ -886,8 +967,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               }
               final v = d.primaryVelocity ?? 0;
               if (v.abs() < 200) return;
-              final next = (_selectedIndex + (v < 0 ? 1 : -1))
-                  .clamp(0, _modeCount - 1);
+              final next =
+                  (_selectedIndex + (v < 0 ? 1 : -1)).clamp(0, _modeCount - 1);
               if (next != _selectedIndex) _onItemTapped(next);
             },
             child: SizedBox.expand(child: CameraPreview(_cameraController!)),
@@ -927,7 +1008,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 child: Text(
                   _selectedIndex == 0
                       ? (isTamil ? 'விவரிக்க தட்டவும்' : 'TAP TO DESCRIBE')
-                      : (isTamil ? 'படிக்க தட்டவும்' : 'TAP TO READ'),
+                      : _selectedIndex == 1
+                          ? (isTamil ? 'படிக்க தட்டவும்' : 'TAP TO READ')
+                          : (isTamil
+                              ? 'குரல் அரட்டைக்கு தட்டவும்'
+                              : 'TAP TO START VOICE CHAT'),
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 26,
@@ -945,7 +1030,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Text(
-                  isTamil ? 'மோடு மாற்ற ஸ்வைப் செய்யவும்' : 'swipe  ←  →  to switch mode',
+                  isTamil
+                      ? 'மோடு மாற்ற ஸ்வைப் செய்யவும்'
+                      : 'swipe  ←  →  to switch mode',
                   style: const TextStyle(color: Colors.white, fontSize: 14),
                 ),
               ),
@@ -1083,14 +1170,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Widget _buildVoiceAssistantOverlay(bool isTamil) {
     if (!_voiceAssistantActive) return const SizedBox.shrink();
-    
+
     return Positioned(
       bottom: 100,
       left: 16,
       right: 16,
       child: Semantics(
         liveRegion: true,
-        label: isTamil ? 'குரல் உதவியாளர் செயலாகிறது' : 'Voice Assistant Active',
+        label:
+            isTamil ? 'குரல் உதவியாளர் செயலாகிறது' : 'Voice Assistant Active',
         child: Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
@@ -1107,9 +1195,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      _voiceStatus.isNotEmpty ? _voiceStatus : (isTamil ? 'குரல் உதவியாளர் செயலாகிறது...' : 'Voice Assistant Active...'),
+                      _voiceStatus.isNotEmpty
+                          ? _voiceStatus
+                          : (isTamil
+                              ? 'குரல் உதவியாளர் செயலாகிறது...'
+                              : 'Voice Assistant Active...'),
                       style: TextStyle(
-                        color: Colors.greenAccent, 
+                        color: Colors.greenAccent,
                         fontSize: 14 * _textScaleFactor,
                         fontWeight: FontWeight.bold,
                       ),
@@ -1120,7 +1212,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       child: Text(
                         '"$_lastTranscription"',
                         style: TextStyle(
-                          color: Colors.white70, 
+                          color: Colors.white70,
                           fontSize: 12 * _textScaleFactor,
                           fontStyle: FontStyle.italic,
                         ),
@@ -1153,9 +1245,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Tooltip(
-        message: isTamil 
-            ? 'குரல் கட்டளை: "$label"'
-            : 'Voice command: "$label"',
+        message: isTamil ? 'குரல் கட்டளை: "$label"' : 'Voice command: "$label"',
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -1163,7 +1253,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             Text(
               label,
               style: TextStyle(
-                color: Colors.white54, 
+                color: Colors.white54,
                 fontSize: 9 * _textScaleFactor,
               ),
             ),
@@ -1190,8 +1280,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               const Icon(Icons.wifi_off, color: Colors.white, size: 16),
               const SizedBox(width: 8),
               Text(
-                isTamil ? 'ஆஃப்லைன் பதிவு - சேமிக்கப்பட்ட பதில்கள் காட்டுகிறது' : 'Offline Mode - Showing cached responses',
-                style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                isTamil
+                    ? 'ஆஃப்லைன் பதிவு - சேமிக்கப்பட்ட பதில்கள் காட்டுகிறது'
+                    : 'Offline Mode - Showing cached responses',
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold),
               ),
             ],
           ),
@@ -1214,7 +1309,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               const SizedBox(height: 16),
               Text(
                 _localization.tr('processing'),
-                style: TextStyle(color: Colors.white, fontSize: 16 * _textScaleFactor),
+                style: TextStyle(
+                    color: Colors.white, fontSize: 16 * _textScaleFactor),
               ),
             ],
           ),
@@ -1224,13 +1320,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildGPSOverlay() {
-    if (!_configService.appConfig.features.gpsEnabled || _currentPosition == null) {
+    if (!_configService.appConfig.features.gpsEnabled ||
+        _currentPosition == null) {
       return const SizedBox.shrink();
     }
-    
+
     final accuracy = _currentPosition!.accuracy;
-    final color = accuracy <= 10 ? Colors.green : (accuracy <= 50 ? Colors.yellow : Colors.orange);
-    
+    final color = accuracy <= 10
+        ? Colors.green
+        : (accuracy <= 50 ? Colors.yellow : Colors.orange);
+
     return Positioned(
       top: 10,
       right: 10,
@@ -1249,7 +1348,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               const SizedBox(width: 6),
               Text(
                 '${accuracy.toStringAsFixed(1)}m',
-                style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold),
               ),
             ],
           ),
@@ -1271,7 +1373,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Widget _buildGPSBottomSheet() {
     final isTamil = _localization.isTamil;
-    
+
     return Padding(
       padding: const EdgeInsets.all(20),
       child: Column(
@@ -1282,7 +1384,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             children: [
               Text(
                 _localization.tr('gps_status'),
-                style: TextStyle(color: Colors.white, fontSize: 20 * _textScaleFactor, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 20 * _textScaleFactor,
+                    fontWeight: FontWeight.bold),
               ),
               const Spacer(),
               IconButton(
@@ -1292,17 +1397,33 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ],
           ),
           const SizedBox(height: 20),
-          _buildGPSInfoRow(_localization.tr('status'), _isGPSEnabled ? _localization.tr('gps_enabled') : _localization.tr('gps_disabled')),
-          _buildGPSInfoRow(_localization.tr('permission'), _currentPosition != null ? _localization.tr('granted') : _localization.tr('pending')),
+          _buildGPSInfoRow(
+              _localization.tr('status'),
+              _isGPSEnabled
+                  ? _localization.tr('gps_enabled')
+                  : _localization.tr('gps_disabled')),
+          _buildGPSInfoRow(
+              _localization.tr('permission'),
+              _currentPosition != null
+                  ? _localization.tr('granted')
+                  : _localization.tr('pending')),
           if (_currentPosition != null) ...[
-            _buildGPSInfoRow(_localization.tr('latitude'), _currentPosition!.latitude.toStringAsFixed(6)),
-            _buildGPSInfoRow(_localization.tr('longitude'), _currentPosition!.longitude.toStringAsFixed(6)),
-            _buildGPSInfoRow(_localization.tr('altitude'), '${_currentPosition!.altitude.toStringAsFixed(1)} m'),
-            _buildGPSInfoRow(_localization.tr('accuracy'), '${_currentPosition!.accuracy.toStringAsFixed(1)} m'),
-            _buildGPSInfoRow(_localization.tr('speed'), '${(_currentPosition!.speed * 3.6).toStringAsFixed(1)} km/h'),
-            _buildGPSInfoRow(_localization.tr('heading'), '${_currentPosition!.heading.toStringAsFixed(0)}°'),
-            _buildGPSInfoRow(_localization.tr('address'), _currentAddress ?? _localization.tr('resolving')),
-            _buildGPSInfoRow(_localization.tr('last_update'), _currentPosition!.timestamp.toLocal().toString().split('.')[0]),
+            _buildGPSInfoRow(_localization.tr('latitude'),
+                _currentPosition!.latitude.toStringAsFixed(6)),
+            _buildGPSInfoRow(_localization.tr('longitude'),
+                _currentPosition!.longitude.toStringAsFixed(6)),
+            _buildGPSInfoRow(_localization.tr('altitude'),
+                '${_currentPosition!.altitude.toStringAsFixed(1)} m'),
+            _buildGPSInfoRow(_localization.tr('accuracy'),
+                '${_currentPosition!.accuracy.toStringAsFixed(1)} m'),
+            _buildGPSInfoRow(_localization.tr('speed'),
+                '${(_currentPosition!.speed * 3.6).toStringAsFixed(1)} km/h'),
+            _buildGPSInfoRow(_localization.tr('heading'),
+                '${_currentPosition!.heading.toStringAsFixed(0)}°'),
+            _buildGPSInfoRow(_localization.tr('address'),
+                _currentAddress ?? _localization.tr('resolving')),
+            _buildGPSInfoRow(_localization.tr('last_update'),
+                _currentPosition!.timestamp.toLocal().toString().split('.')[0]),
           ],
           const SizedBox(height: 20),
           if (!_isGPSEnabled)
@@ -1344,13 +1465,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             width: 100,
             child: Text(
               '$label:',
-              style: TextStyle(color: Colors.white70, fontSize: 14 * _textScaleFactor),
+              style: TextStyle(
+                  color: Colors.white70, fontSize: 14 * _textScaleFactor),
             ),
           ),
           Expanded(
             child: Text(
               value,
-              style: TextStyle(color: Colors.white, fontSize: 14 * _textScaleFactor),
+              style: TextStyle(
+                  color: Colors.white, fontSize: 14 * _textScaleFactor),
             ),
           ),
         ],
@@ -1367,7 +1490,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           const SizedBox(height: 16),
           Text(
             _localization.tr('camera_not_available'),
-            style: TextStyle(fontSize: 18 * _textScaleFactor, color: Colors.grey),
+            style:
+                TextStyle(fontSize: 18 * _textScaleFactor, color: Colors.grey),
           ),
           const SizedBox(height: 16),
           ElevatedButton(
@@ -1382,5 +1506,4 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       ),
     );
   }
-
 }

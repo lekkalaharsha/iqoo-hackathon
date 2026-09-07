@@ -1,3 +1,7 @@
+﻿> Historical plan/context: consult PROJECT.md for current verification.
+> Offline, accessibility, latency, and device claims below are not current
+> acceptance evidence. Follow AGENTS.md safety rules for all new work.
+
 # Logic Legends — iQOO Hackathon 2026 (Chennai) Plan
 
 **User:** blind and low-vision people (also serves low-literacy and elderly users — same flow, no extra build).
@@ -8,7 +12,7 @@
 
 That distinction now carries the entire pitch, so state it in those terms every time: **comprehension, not transcription.** Lookout will read "PARACETAMOL IP 650mg" off a strip. It will not tell you that is a fever tablet, that four a day is the ceiling, or that it expired last month.
 
-> Point at a medicine strip → *"Crocin 650. Paracetamol, for fever and pain. Maximum four tablets a day. Expires January 2026."*
+> Point at a medicine strip → *"Crocin 650. Paracetamol, for fever and pain. I cannot determine safe dosing from this capture. Verify it with a pharmacist. Expires January 2026."*
 >
 > Point at a ration-shop notice → *"New ration card applications open September 20. Bring Aadhaar and an income certificate to the office."*
 
@@ -65,7 +69,7 @@ Do not write "runs on the NPU" in the pitch until step 1 is measured. Say "on-de
 | **Phase 1 submission video (now)** | Cloud Gemini | Proves the flow and the UX. Labelled as the cloud prototype — no offline claims. |
 | **Hackathon build (Sept 12–13)** | On-device ML Kit + Gemma 2B | The graded version. Airplane mode on stage. |
 
-Never claim offline operation in the submission video. The claim becomes true at the event, and only after the spike confirms it.
+Never claim offline operation in the submission video. Make that claim only after device tests establish the exact offline behavior.
 
 ---
 
@@ -121,7 +125,7 @@ Assume one live failure. The fast path carries it.
 
 **0:00–0:15** — *"Airplane mode is on. No cloud."* Hold the power button; the app opens as an Assist provider and speaks *"Ready. Point at a document or medicine."* Pick up a medicine strip.
 
-**0:15–0:40** — Volume Up. Haptic + shutter fire instantly. OCR speaks within a second: *"Crocin 650mg. Expiry 01/2026."* Gemma 2B then streams: *"Paracetamol, for fever and pain. Maximum four tablets a day."*
+**0:15–0:40** — Volume Up. Haptic + shutter fire instantly. OCR speaks within a second: *"Crocin 650mg. Expiry 01/2026."* Gemma 2B then streams: *"Paracetamol, for fever and pain. I cannot determine safe dosing from this capture. Verify it with a pharmacist."*
 
 **0:40–1:05** — A government notice or utility bill. Volume Up. OCR reads the dense official wording; the model reduces it to the action: *"Ration card applications open September 20. Bring Aadhaar and income proof."* Say the contrast out loud here — *"a screen reader would have read you four paragraphs of that."*
 *If the model stalls here:* "The OCR answer was already spoken — Volume Down repeats the last safe answer. The user is never left in silence." **The failure becomes a feature demonstration.**
@@ -140,7 +144,7 @@ The 90-second version above is the elevator pitch. This is the full run for a
 **Two framings — say the right one:**
 - **Stage (Sept 12–13):** "Airplane mode is on." On-device ML Kit + Gemma 2B.
 - **Submission video (now):** "This is the cloud prototype." Cloud Gemini.
-  **Never say offline in the video.** The claim becomes true at the event.
+  **Never say offline in the video.** It remains a goal until device tests establish it.
 
 Assume one live failure somewhere. The fast path carries it — turn it into a
 feature demo when it happens.
@@ -149,7 +153,7 @@ feature demo when it happens.
 | --- | --- | --- |
 | **0:00–0:40** | Problem | A blind person hands their medicine strip, their bank letter, their phone to a sighted relative to know what it says — every day, a loss of privacy and independence. On a phone with no signal, nothing today helps them. |
 | **0:40–1:10** | Eyes-free launch | Hold the power button → app opens as the device Assistant, speaks *"Ready. Point at a document or medicine."* Show the gestures by using them: swipe to switch mode (spoken confirmation), explain there is no button to find. |
-| **1:10–2:00** | Read & Explain — medicine | Volume Up. Haptic + shutter. OCR speaks in <1 s: *"Crocin 650mg. Expiry 01/2026."* Then the model streams: *"Paracetamol, for fever and pain. Maximum four tablets a day. Do not take more."* Contrast out loud: *"a screen reader stops at the first line."* |
+| **1:10–2:00** | Read & Explain — medicine | Volume Up. Haptic + shutter. OCR speaks in <1 s: *"Crocin 650mg. Expiry 01/2026."* Then the model streams: *"Paracetamol, for fever and pain. I cannot determine safe dosing from this capture. Verify it with a pharmacist."* Contrast out loud: *"a screen reader stops at the first line."* |
 | **2:00–2:40** | Read & Explain — government notice | Volume Up. Dense official wording in; one action out: *"Ration card applications open September 20. Bring Aadhaar and an income certificate to the office."* *"That was four paragraphs. It told you the one thing you have to do."* |
 | **2:40–3:25** | Read & Explain — bill + pay | A utility bill. It reads the amount and due date, detects the UPI payee printed on it: *"This bill can be paid by U P I. Press and hold anywhere to pay 840 rupees."* Long-press → it speaks the amount + payee → the user's own UPI app opens for the PIN. *"The payment never touches our app. We removed the step where someone else has to read the bill and type the amount."* |
 | **3:25–4:20** | Messages + fraud protection | Open the inbox. It reads today's messages, tags each — OTP, transaction, spam — all offline. Hits a scam SMS: **warning first**, refuses to read the link aloud, refuses to read the OTP digits: *"This looks like a scam. It rushes you and contains a link. Do not open it. Ask someone you trust."* Double-tap to mark the electricity-bill reminder important; *"read important messages"* replays just that one. |

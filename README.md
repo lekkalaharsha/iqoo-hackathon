@@ -1,18 +1,17 @@
-# Logic Legends
+﻿# Logic Legends
 
-An on-device visual assistant for blind and low-vision users. Point the phone at
-a document — a medicine strip, a bill, an official notice — and it doesn't just
-read the text aloud, it **explains what the text means and what to do next**.
+A Flutter visual-assistance prototype for blind and low-vision users. It uses
+on-device text recognition and cloud AI explanations. The on-device language
+model is not implemented yet.
 
 Built for the iQOO Hackathon 2026 (Chennai). Flutter, Android, English.
 
-> Point at a medicine strip → *"Crocin 650. Paracetamol, for fever and pain.
-> Maximum four tablets a day. Expires January 2026."*
+Use a clearly printed, non-sensitive notice for the demo. Read captured text
+first, then label any explanation as interpretation. Missing or unclear dose,
+expiry, amount, or required-action details must never be invented.
 
-Google Lookout and Seeing AI will read *"PARACETAMOL IP 650mg"* off the strip.
-They won't tell you it's a fever tablet, that four a day is the ceiling, or that
-it expired last month. That difference — **comprehension, not transcription** —
-is the whole point.
+Start with PROJECT.md for current evidence, AGENTS.md for coding rules, and
+DEMO_SETUP.md for this laptop's run steps. Earlier plans are not verification.
 
 ---
 
@@ -28,15 +27,15 @@ failure. Instead, one capture drives two paths:
                   ├─► FAST: ML Kit OCR ──► speak the raw text        (~100–300 ms)
                   │        classify: medicine / bill / notice / generic
                   │
-                  └─► SLOW: language model ──► stream a plain-language
-                           explanation, sentence by sentence          (2–6 s)
+                  └─► SLOW: language model ──► return a plain-language
+                           explanation, then speak by sentence         (2–6 s)
 
    if SLOW stalls / times out (6 s) ──► speak a rule-based template over the OCR text
    result is cached by SHA-1 image hash ──► a repeat capture answers instantly
 ```
 
-The fast path is the guaranteed answer. The slow path is the value-add. The
-screen is never silent.
+OCR is the intended fast path, but it can fail or misread text. The
+speech and failure behavior still require physical-device validation.
 
 The language model behind the explanation is a **seam** (`AiService.explain`):
 
@@ -73,6 +72,9 @@ information is never repeated.
 2. **Explore** — general scene description (`ChatScreen`). Meaningful only once a
    multimodal on-device model (Gemma 3n) is wired; kept out of the demo until
    then.
+3. **Voice Chat** — swipe left once from the default Read & Explain mode, then
+   tap anywhere or press Volume Up. The microphone collects speech across pauses
+   and sends the turn after the user says “clear over.”
 
 ### Supporting features
 
@@ -95,7 +97,7 @@ information is never repeated.
 
 ```
 lib/
-├── main.dart                         app entry, camera init, Gemini init
+├── main.dart                         app entry and camera init
 ├── models/                           app_config / prompts (+ hand-written .g.dart)
 ├── screens/
 │   ├── homepage.dart                 camera, gestures, routing, emergency overlay
@@ -108,6 +110,7 @@ lib/
 │   │                                 sentence-split — has a `dart run` self-check
 │   ├── ai_service.dart               cloud Gemini today; explain() is the
 │   │                                 on-device seam for flutter_gemma
+│   ├── gemini_api_client.dart        bounded authenticated Gemini REST client
 │   ├── on_device_llm_service.dart    stub — returns null (cloud fallback)
 │   ├── speech_config.dart            single source for TTS rate/pitch/language
 │   ├── hardware_keys.dart            volume-rocker EventChannel + repeat buffer
@@ -127,7 +130,7 @@ android/app/src/main/kotlin/.../MainActivity.kt
 ```
 
 Config lives in `assets/config/app_config.json` and `prompts.json` — feature
-flags and prompt templates, editable without a rebuild.
+flags and prompt templates, bundled as assets; changes require a rebuild. Runtime editing is not implemented.
 
 ---
 

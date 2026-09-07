@@ -1,3 +1,7 @@
+﻿> Historical plan/context: consult PROJECT.md for current verification.
+> Offline, accessibility, latency, and device claims below are not current
+> acceptance evidence. Follow AGENTS.md safety rules for all new work.
+
 # Handoff — 2026-09-03
 
 Read `README.md` for architecture, `DEMO_FEATURES.md` for the hackathon plan +

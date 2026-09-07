@@ -4,32 +4,65 @@
 
 enum DocType { medicine, notice, bill, generic }
 
-/// Cheap keyword classification of OCR output. Used to pick a spoken template
-/// when the LLM does not answer in time.
+/// Conservative classification of OCR output. False high-stakes labels are
+/// worse than a generic result, so medicine requires several independent clues.
 DocType classifyDocument(String ocrText) {
-  final t = ocrText.toLowerCase();
+  final text = collapseWhitespace(ocrText.toLowerCase());
 
-  const medicine = [
-    'mg', 'tablet', 'tablets', 'capsule', 'syrup', 'dosage', 'dose',
-    'paracetamol', 'ibuprofen', 'amoxicillin', 'antibiotic', 'ip ',
-    'expiry', 'exp.', 'mfd', 'batch no', 'rx',
-  ];
-  const bill = [
-    'amount due', 'total due', 'bill', 'invoice', 'due date', 'units',
-    'meter', 'consumer no', 'account no', 'payable', 'rs.', '₹',
-  ];
-  const notice = [
-    'notice', 'applications', 'apply', 'office', 'government', 'scheme',
-    'eligible', 'documents required', 'last date', 'submit', 'aadhaar',
-  ];
+  bool hasTerm(String term) => RegExp(
+        '(^|[^a-z0-9])${RegExp.escape(term)}([^a-z0-9]|\$)',
+      ).hasMatch(text);
+  int termScore(List<String> terms) => terms.where(hasTerm).length;
 
-  int score(List<String> words) => words.where(t.contains).length;
+  const medicineIdentity = [
+    'paracetamol',
+    'ibuprofen',
+    'amoxicillin',
+    'antibiotic',
+  ];
+  const medicineForm = [
+    'tablet',
+    'tablets',
+    'capsule',
+    'capsules',
+    'syrup',
+    'dosage',
+    'dose',
+  ];
+  const medicinePack = ['batch no', 'mfd', 'manufactured by', 'rx'];
+  final hasDosageUnit = RegExp(
+    r'\b\d+(?:\.\d+)?\s*(?:mg|mcg|g|ml)\b',
+    caseSensitive: false,
+  ).hasMatch(text);
+  final medicineScore =
+      termScore(medicineIdentity) * 3 +
+      termScore(medicineForm) * 2 +
+      termScore(medicinePack) +
+      (hasDosageUnit ? 2 : 0);
 
-  final m = score(medicine), b = score(bill), n = score(notice);
-  if (m == 0 && b == 0 && n == 0) return DocType.generic;
-  if (m >= b && m >= n) return DocType.medicine;
-  if (b >= n) return DocType.bill;
-  return DocType.notice;
+  const billTerms = [
+    'amount due', 'total due', 'bill', 'invoice', 'receipt', 'due date',
+    'meter', 'consumer no', 'account no', 'payable',
+  ];
+  const noticeContext = [
+    'applications', 'office', 'government', 'scheme', 'eligible',
+    'documents required', 'last date', 'submit', 'aadhaar',
+  ];
+  final billScore = termScore(billTerms) * 2 +
+      (RegExp(r'(?:₹|\brs\.?|\binr\b)\s*\d', caseSensitive: false)
+              .hasMatch(text)
+          ? 1
+          : 0);
+  final noticeScore = (hasTerm('notice') ? 3 : 0) + termScore(noticeContext);
+
+  if (medicineScore >= 3 &&
+      medicineScore > billScore &&
+      medicineScore > noticeScore) {
+    return DocType.medicine;
+  }
+  if (billScore >= 2 && billScore >= noticeScore) return DocType.bill;
+  if (noticeScore >= 3) return DocType.notice;
+  return DocType.generic;
 }
 
 /// The fact the user is usually hunting for on a strip / bill / notice — an
@@ -91,14 +124,19 @@ String explainPrompt(DocType type, String ocrText, {String? userQuestion}) {
   const base =
       'You are helping a blind person who cannot see this document. '
       'Answer in at most three short sentences, plain spoken English, no '
-      'formatting or bullet points. Do not repeat the raw text back.';
+      'formatting or bullet points. Do not repeat the raw text back. Use only '
+      'facts stated in the captured text. Never infer a medicine purpose, safe '
+      'dose, expiry, bill amount, due date, legal requirement, or identity. '
+      'If a requested fact is missing or unclear, say that it could not be '
+      'confirmed and suggest checking the original with a trusted person.';
   final q = userQuestion?.trim();
   final ask = (q != null && q.isNotEmpty)
       ? 'The person asks: "$q". Answer that using the document; '
           'if the document does not say, tell them so.'
       : switch (type) {
           DocType.medicine =>
-            'Say what this medicine is for, the dose limit, and the expiry if present.',
+            'State the medicine name, purpose, dose instructions, and expiry '
+              'only when each is explicitly present and clear.',
           DocType.bill =>
             'Say who the bill is from, how much is owed, and the due date.',
           DocType.notice =>
@@ -188,7 +226,8 @@ void main() {
   assert(firstSentence('This is paracetamol. It treats') ==
       'This is paracetamol.');
 
-  assert(explainPrompt(DocType.medicine, 'x').contains('dose limit'));
+  assert(explainPrompt(DocType.medicine, 'x')
+      .contains('only when each is explicitly present and clear'));
   assert(collapseWhitespace(' a \n\n b  ') == 'a b');
 
   // UPI deep link: only when a real VPA is present; amount is optional.
