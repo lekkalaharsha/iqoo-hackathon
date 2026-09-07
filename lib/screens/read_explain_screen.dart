@@ -180,10 +180,18 @@ class _ReadExplainScreenState extends State<ReadExplainScreen> {
     if (!mounted) return;
     if (full == null || full.trim().isEmpty) {
       final fb = fallbackSentence(type, _ocrText);
-      setState(() => _stage = _Stage.failed);
+      // Write the template to the panel too — otherwise the explanation area is
+      // blank whenever the model is unavailable (e.g. no API key configured),
+      // even though the fallback was spoken.
       if (_explanation.isEmpty) {
+        setState(() {
+          _stage = _Stage.failed;
+          _explanation.write(fb);
+        });
         await _speak(fb);
         _spokenFull += ' $fb';
+      } else {
+        setState(() => _stage = _Stage.failed);
       }
     } else {
       setState(() => _stage = _Stage.done);

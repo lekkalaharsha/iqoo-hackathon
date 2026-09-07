@@ -325,6 +325,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (!_configService.appConfig.features.ttsEnabled) return;
     try {
       await SpeechConfig.apply(_tts);
+      // If the device's TTS engine has no usable English voice, say so once
+      // (best effort — a fallback voice may still speak it) and show it for a
+      // sighted helper, instead of the app just going silent.
+      if (SpeechConfig.ttsHealthy.value == false) {
+        _showSnackBar(SpeechConfig.ttsBrokenAdvice);
+        SpokenText.last = SpeechConfig.ttsBrokenAdvice;
+        await _tts.speak(SpeechConfig.ttsBrokenAdvice);
+        return;
+      }
       final msg = _localization.isTamil
           ? 'AI அனைவருக்கும் தயார். படம் எடுக்க எங்கும் தட்டவும்.'
           : 'Logic Legends ready. Read and Explain mode. Point at printed text '
