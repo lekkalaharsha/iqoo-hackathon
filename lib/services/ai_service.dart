@@ -1,35 +1,31 @@
 import '../screens/constapi.dart';
 import 'package:flutter/foundation.dart';
-import '../services/on_device_llm_service.dart';
 import '../services/browsing_service.dart';
 import '../services/config_service.dart';
 import '../services/localization_service.dart';
-import '../services/gemini_api_client.dart';
+import 'llm/llm_backend.dart';
+import 'llm/gemini_backend.dart';
+import 'llm/gemma_backend.dart';
 
 class AIService {
   static final AIService _instance = AIService._internal();
   factory AIService() => _instance;
   AIService._internal();
 
-  final OnDeviceLLMService _onDeviceLLM = OnDeviceLLMService();
   final BrowsingService _browsing = BrowsingService();
   final ConfigService _configService = ConfigService();
   final LocalizationService _localization = LocalizationService();
 
-  late final GeminiApiClient _gemini = GeminiApiClient(apiKey: GEMINI_API_KEY);
-  bool get cloudConfigured =>
-      GEMINI_API_KEY.trim().isNotEmpty && !GEMINI_API_KEY.startsWith('YOUR_');
+  /// The one text-generation seam. On-device is tried first when ready; cloud
+  /// is the fallback. Swapping the on-device path to a real model is a change
+  /// to [GemmaBackend] alone — nothing here or in callers moves.
+  final LlmBackend _cloud = GeminiBackend(apiKey: GEMINI_API_KEY);
+  final LlmBackend _onDevice = GemmaBackend();
+
+  bool get cloudConfigured => _cloud.isReady;
   String? lastFailureMessage;
   bool _useOnDevice = false;
   bool _initialized = false;
-
-  /// Prefer the stable alias. Quota and availability can differ by model, so a
-  /// model-specific failure must not prevent trying the remaining choices.
-  static const _models = <String>[
-    'models/gemini-flash-latest',
-    'models/gemini-3.7-flash',
-    'models/gemini-3.6-flash',
-  ];
 
   bool get useOnDevice => _useOnDevice;
   bool get initialized => _initialized;
@@ -39,13 +35,12 @@ class AIService {
 
     await _configService.initialize();
     await _localization.initialize();
+    await _cloud.initialize();
 
     if (_configService.appConfig.features.onDeviceLLM) {
-      _useOnDevice = await _onDeviceLLM.initialize();
+      await _onDevice.initialize();
+      _useOnDevice = _onDevice.isReady;
     }
-
-    // Cloud Gemini is initialised once in main.dart with GEMINI_API_KEY.
-    // No re-init here — a second Gemini.init() with a bad key breaks every call.
 
     _initialized = true;
   }
@@ -57,9 +52,8 @@ class AIService {
     bool enableBrowsing = true,
   }) async {
     lastFailureMessage = null;
-    if (!cloudConfigured && !_useOnDevice) {
-      lastFailureMessage = 'Scene descriptions are not set up yet. '
-          'You can still use Read and Explain to read printed text.';
+    if (!_cloud.isReady && !_useOnDevice) {
+      lastFailureMessage = _messageForFailure(LlmFailure.notReady);
       return null;
     }
     // Check if prompt needs real-world info
@@ -73,41 +67,22 @@ class AIService {
       }
     }
 
-    // Try on-device first
-    if (_useOnDevice && _onDeviceLLM.initialized) {
-      final response =
-          await _onDeviceLLM.generateResponse(finalPrompt, images: images);
-      if (response != null) return _formatResponse(response, browsingContext);
-      // Fall through to cloud if on-device fails
+    // On-device first when ready; cloud otherwise.
+    if (_useOnDevice && _onDevice.isReady) {
+      final onDeviceResult =
+          await _onDevice.generate(prompt: finalPrompt, images: images);
+      if (onDeviceResult.hasText) {
+        return _formatResponse(onDeviceResult.value!, browsingContext);
+      }
+      // Fall through to cloud on any on-device failure.
     }
 
-    // Cloud fallback — try each model, move on when one 503s / times out.
-    for (final model in _models) {
-      try {
-        final text = await _gemini.generateContent(
-          model: model,
-          prompt: finalPrompt,
-          images: images,
-        );
-
-        if (text.trim().isNotEmpty) {
-          return _formatResponse(text, browsingContext);
-        }
-      } on GeminiApiException catch (error) {
-        lastFailureMessage = _messageForFailure(error.reason);
-        debugPrint('AIService.generateResponse $model failed: '
-            '${error.reason}, status ${error.statusCode}');
-        if (error.reason == GeminiFailureReason.quota ||
-            error.reason == GeminiFailureReason.unavailable ||
-            error.reason == GeminiFailureReason.emptyResponse) {
-          continue;
-        }
-        break;
-      } catch (e) {
-        lastFailureMessage = _messageForFailure(GeminiFailureReason.network);
-        debugPrint('AIService.generateResponse failed without response data');
-        break;
-      }
+    final result = await _cloud.generate(prompt: finalPrompt, images: images);
+    if (result.hasText) {
+      return _formatResponse(result.value!, browsingContext);
+    }
+    if (result.failure != null) {
+      lastFailureMessage = _messageForFailure(result.failure!);
     }
     return null;
   }
@@ -123,32 +98,31 @@ class AIService {
     void Function(String sentence)? onSentence,
     Duration timeout = const Duration(seconds: 6),
   }) async {
-    // ponytail: on-device path lands here once flutter_gemma is wired; for now
-    // it is the same cloud call, just text-only and sentence-streamed.
-    if (!cloudConfigured) return null;
-    for (final model in _models) {
-      try {
-        final full = await _gemini.generateContent(
-          model: model,
-          prompt: promptText,
-          timeout: timeout,
-        );
-        for (final sentence in _spokenSentences(full)) {
-          onSentence?.call(sentence);
-        }
-        return full;
-      } on GeminiApiException catch (error) {
-        debugPrint('AIService.explain $model failed: '
-            '${error.reason}, status ${error.statusCode}');
-        if (error.reason == GeminiFailureReason.quota ||
-            error.reason == GeminiFailureReason.unavailable ||
-            error.reason == GeminiFailureReason.emptyResponse) {
-          continue;
-        }
-        break;
+    // On-device first once GemmaBackend is wired; cloud today. Either way the
+    // full text is split into sentences here so TTS can start on sentence one.
+    if (!_cloud.isReady && !(_useOnDevice && _onDevice.isReady)) return null;
+
+    if (_useOnDevice && _onDevice.isReady) {
+      final onDeviceResult =
+          await _onDevice.generate(prompt: promptText, timeout: timeout);
+      if (onDeviceResult.hasText) {
+        _emitSentences(onDeviceResult.value!, onSentence);
+        return onDeviceResult.value;
       }
     }
+
+    final result = await _cloud.generate(prompt: promptText, timeout: timeout);
+    if (result.hasText) {
+      _emitSentences(result.value!, onSentence);
+      return result.value;
+    }
     return null;
+  }
+
+  void _emitSentences(String text, void Function(String)? onSentence) {
+    for (final sentence in _spokenSentences(text)) {
+      onSentence?.call(sentence);
+    }
   }
 
   Iterable<String> _spokenSentences(String text) sync* {
@@ -159,18 +133,19 @@ class AIService {
     }
   }
 
-  String _messageForFailure(GeminiFailureReason reason) => switch (reason) {
-        GeminiFailureReason.unauthorized =>
+  String _messageForFailure(LlmFailure reason) => switch (reason) {
+        LlmFailure.notReady || LlmFailure.unsupported =>
+          'Scene descriptions are not set up yet. '
+              'You can still use Read and Explain to read printed text.',
+        LlmFailure.unauthorized =>
           'The assistant setup was rejected. Check the Gemini key.',
-        GeminiFailureReason.quota =>
+        LlmFailure.quota =>
           'The assistant usage limit was reached. Try again shortly.',
-        GeminiFailureReason.invalidRequest =>
+        LlmFailure.invalidRequest =>
           'The assistant could not process this photo. Try another photo.',
-        GeminiFailureReason.unavailable ||
-        GeminiFailureReason.emptyResponse =>
+        LlmFailure.unavailable || LlmFailure.emptyResponse =>
           'The assistant is temporarily unavailable. Try again shortly.',
-        GeminiFailureReason.timeout ||
-        GeminiFailureReason.network =>
+        LlmFailure.timeout || LlmFailure.network =>
           'The assistant could not connect. Check your internet and try again.',
       };
 
@@ -340,12 +315,12 @@ Instructions: Use the above real-time information to provide an accurate, up-to-
   }
 
   void setUseOnDevice(bool use) {
-    _useOnDevice = use && _onDeviceLLM.initialized;
+    _useOnDevice = use && _onDevice.isReady;
   }
 
   void dispose() {
-    _onDeviceLLM.dispose();
+    _onDevice.dispose();
+    _cloud.dispose();
     _browsing.dispose();
-    _gemini.close();
   }
 }
