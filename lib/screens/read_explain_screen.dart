@@ -45,6 +45,9 @@ class _ReadExplainScreenState extends State<ReadExplainScreen> {
   String _spokenFull = ''; // everything said, for Volume-Down repeat
   String? _payUri; // set when a bill prints a UPI payee; enables "pay this bill"
 
+  Timer? _heartbeat; // "still working" cue while the explanation is pending
+  bool _skipExplain = false; // set when the user taps to stop waiting
+
   @override
   void initState() {
     super.initState();
@@ -62,8 +65,39 @@ class _ReadExplainScreenState extends State<ReadExplainScreen> {
   @override
   void dispose() {
     _keySub?.cancel();
+    _heartbeat?.cancel();
     _tts.stop();
     super.dispose();
+  }
+
+  void _startHeartbeat() {
+    _heartbeat?.cancel();
+    _heartbeat = Timer.periodic(const Duration(seconds: 6), (_) {
+      if (_stage == _Stage.explaining && _explanation.isEmpty && !_skipExplain) {
+        _speak('Still working.');
+      }
+    });
+  }
+
+  void _stopHeartbeat() {
+    _heartbeat?.cancel();
+    _heartbeat = null;
+  }
+
+  /// Tap while the explanation is pending → stop waiting, speak the template
+  /// now. The in-flight request is left to finish and its result ignored.
+  Future<void> _skipToFallback() async {
+    if (_stage != _Stage.explaining || _skipExplain) return;
+    _skipExplain = true;
+    _stopHeartbeat();
+    HapticFeedback.selectionClick();
+    final fb = fallbackSentence(classifyDocument(_ocrText), _ocrText);
+    setState(() {
+      _stage = _Stage.failed;
+      if (_explanation.isEmpty) _explanation.write(fb);
+    });
+    await _speak(fb);
+    _spokenFull += ' $fb';
   }
 
   Future<void> _run() async {
@@ -102,10 +136,18 @@ class _ReadExplainScreenState extends State<ReadExplainScreen> {
       return;
     }
 
-    // Speak the raw text right away — this is the guaranteed answer.
+    // Lead with the fact the user is usually hunting for (expiry / amount /
+    // due date) before the raw text dump.
+    final fact = keyFact(type, _ocrText);
+    if (fact != null) {
+      await _speak(fact);
+      _spokenFull = '$fact ';
+    }
+
+    // Then the raw text — the guaranteed answer.
     final lead = _localization.isTamil ? 'உரை: ' : 'Text found. ';
     await _speak(lead + _preview(_ocrText));
-    _spokenFull = lead + _preview(_ocrText);
+    _spokenFull += lead + _preview(_ocrText);
 
     // Very little text usually means blur or a bad angle — a blind user can't
     // see that. Nudge a retry, but keep going with what we have.
@@ -118,17 +160,20 @@ class _ReadExplainScreenState extends State<ReadExplainScreen> {
 
     // --- Slow path: explanation, streamed ---
     setState(() => _stage = _Stage.explaining);
+    _startHeartbeat();
     final full = await _ai.explain(
-      explainPrompt(type, _ocrText, userQuestion: widget.question),
+      explainPrompt(type, _ocrText,
+          userQuestion: widget.question, brief: SpeechConfig.briefAnswers),
       onSentence: (s) {
-        if (!mounted) return;
+        if (!mounted || _skipExplain) return;
         setState(() => _explanation.write('$s '));
         _speak(s);
         _spokenFull += ' $s';
       },
     );
+    _stopHeartbeat();
 
-    if (!mounted) return;
+    if (!mounted || _skipExplain) return;
     if (full == null || full.trim().isEmpty) {
       // Model gave nothing usable — fall back to a template over the OCR text.
       final fb = fallbackSentence(type, _ocrText);
@@ -163,21 +208,25 @@ class _ReadExplainScreenState extends State<ReadExplainScreen> {
       return;
     }
     await _speak('You asked: $q');
+    _skipExplain = false;
     setState(() {
       _explanation.clear();
       _stage = _Stage.explaining;
     });
+    _startHeartbeat();
     final type = classifyDocument(_ocrText);
     final full = await _ai.explain(
-      explainPrompt(type, _ocrText, userQuestion: q),
+      explainPrompt(type, _ocrText,
+          userQuestion: q, brief: SpeechConfig.briefAnswers),
       onSentence: (s) {
-        if (!mounted) return;
+        if (!mounted || _skipExplain) return;
         setState(() => _explanation.write('$s '));
         _speak(s);
         _spokenFull += ' $s';
       },
     );
-    if (!mounted) return;
+    _stopHeartbeat();
+    if (!mounted || _skipExplain) return;
     if (full == null || full.trim().isEmpty) {
       final fb = fallbackSentence(type, _ocrText);
       // Write the template to the panel too — otherwise the explanation area is
@@ -284,10 +333,12 @@ class _ReadExplainScreenState extends State<ReadExplainScreen> {
         button: true,
         liveRegion: true,
         label: _statusLabel,
-        hint: 'Double-tap to ask a follow-up question about this document.',
+        hint: _stage == _Stage.explaining
+            ? 'Tap to stop waiting and hear the text summary now.'
+            : 'Double-tap to ask a follow-up question about this document.',
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onTap: _repeat,
+          onTap: _stage == _Stage.explaining ? _skipToFallback : _repeat,
           onDoubleTap: _askFollowUp,
           onLongPress: _payUri != null ? _payBill : null,
           child: ListView(

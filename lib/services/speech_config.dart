@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 /// One place to tune how the app sounds.
@@ -22,13 +23,62 @@ class SpeechConfig {
   /// scale runs hot, so 1.0 already sounds rushed and ~0.5 is a normal talking
   /// speed. iOS uses 0.0–1.0 with ~0.5 as normal.
   /// ponytail: this is the calibration knob — comfortable speed is personal and
-  /// it's the one number a blind tester will comment on. Nudge, rebuild, listen.
-  static double get rate => Platform.isIOS ? 0.5 : 0.4;
+  /// it's the one number a blind tester will comment on. It is now user-settable
+  /// (Settings > Speaking speed) and persisted; [defaultRate] is the fallback.
+  static double get defaultRate => Platform.isIOS ? 0.5 : 0.4;
+  static const double minRate = 0.20;
+  static const double maxRate = 0.90;
+
+  static double _rate = Platform.isIOS ? 0.5 : 0.4;
+  static double get rate => _rate;
 
   /// Slightly below neutral so it does not blend with people talking nearby.
   static const double pitch = 0.9;
 
   static const double volume = 1.0;
+
+  // --- persisted user preferences -------------------------------------------
+
+  static const _kRateKey = 'pref_tts_rate';
+  static const _kBriefKey = 'pref_brief_answers';
+  static bool _prefsLoaded = false;
+
+  /// When true the model is asked for one short sentence instead of up to three
+  /// — for users who want the fact and nothing else.
+  static bool briefAnswers = false;
+
+  /// Load the persisted rate / brief-answers preferences (idempotent). Call
+  /// this before reading [rate] or [briefAnswers] outside of [apply].
+  static Future<void> ensurePrefs() => _loadPrefs();
+
+  static Future<void> _loadPrefs() async {
+    if (_prefsLoaded) return;
+    _prefsLoaded = true;
+    try {
+      final p = await SharedPreferences.getInstance();
+      final saved = p.getDouble(_kRateKey);
+      if (saved != null) _rate = saved.clamp(minRate, maxRate);
+      briefAnswers = p.getBool(_kBriefKey) ?? false;
+    } catch (_) {/* defaults stand */}
+  }
+
+  /// Persist and apply a new speaking speed immediately.
+  static Future<void> setRate(double value) async {
+    _rate = value.clamp(minRate, maxRate);
+    try {
+      await tts.setSpeechRate(_rate);
+      final p = await SharedPreferences.getInstance();
+      await p.setDouble(_kRateKey, _rate);
+    } catch (_) {}
+  }
+
+  static Future<void> setBriefAnswers(bool value) async {
+    briefAnswers = value;
+    try {
+      final p = await SharedPreferences.getInstance();
+      await p.setBool(_kBriefKey, value);
+    } catch (_) {}
+  }
 
   // --- TTS health safety net ---------------------------------------------------
   //
@@ -77,6 +127,7 @@ class SpeechConfig {
   /// Android, so a screen left in that mode would let the next screen's lines
   /// stomp each other. Calling apply() on entry resets that.
   static Future<void> apply(FlutterTts tts) async {
+    await _loadPrefs();
     await tts.setLanguage('en-US');
     await _preferHealthyVoice(tts);
     await tts.setSpeechRate(rate);

@@ -55,6 +55,26 @@ class MainActivity : FlutterActivity() {
                             result.success(true)
                         }
                     }
+                    // Jump straight to the system Text-to-speech settings so the
+                    // user can reinstall/repair the voice when TTS is broken.
+                    "openTtsSettings" -> {
+                        val tries = listOf(
+                            "com.android.settings.TTS_SETTINGS",
+                            "android.settings.ACCESSIBILITY_SETTINGS",
+                            android.provider.Settings.ACTION_SETTINGS,
+                        )
+                        var opened = false
+                        for (action in tries) {
+                            try {
+                                startActivity(
+                                    Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                )
+                                opened = true
+                                break
+                            } catch (_: Exception) { /* try the next one */ }
+                        }
+                        result.success(opened)
+                    }
                     // Opens the system "Digital assistant app" picker so the user
                     // can set Logic Legends as the assistant (power-button-hold launch).
                     "openAssistSettings" -> {
