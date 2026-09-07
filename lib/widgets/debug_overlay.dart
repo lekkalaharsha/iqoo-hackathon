@@ -160,7 +160,7 @@ class _DebugOverlayState extends State<DebugOverlay> with WidgetsBindingObserver
               const Divider(color: Colors.green),
               _buildSection('PERFORMANCE', [
                 _buildRow('FPS', _fps.toStringAsFixed(1)),
-                _buildRow('Model', _aiService.useOnDevice ? 'ON-DEVICE (Gemma 2B)' : 'CLOUD (Gemini)'),
+                _buildRow('Model', _aiService.useOnDevice ? 'ON-DEVICE (Gemma)' : 'CLOUD (Gemini)'),
                 _buildRow('On-Device Ready', _aiService.initialized ? (_aiService.useOnDevice ? 'YES' : 'NO (fallback)') : 'INIT...'),
               ]),
               _buildSection('GPS', [

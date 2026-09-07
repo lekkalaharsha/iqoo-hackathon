@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:geolocator/geolocator.dart';
@@ -203,14 +204,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       return;
     }
 
-    setState(() => _selectedIndex = mode);
+    setState(() => _selectedIndex = mode.clamp(0, _modeCount - 1));
     await _takePicture();
   }
 
   void _announceModeChange(int mode) {
-    const modeNames = ['Explore', 'Read and Explain'];
-    final name = modeNames[mode.clamp(0, _modeCount - 1)];
-    _voiceAssistant.announce('Switched to $name mode');
+    // Reuse the single source of mode names so this can never index past the
+    // list when a new mode (e.g. Voice Chat) is added.
+    _voiceAssistant.announce('Switched to ${_getModeName(mode)} mode');
   }
 
   Future<void> _sendAIQuery(String query) async {
@@ -243,29 +244,28 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void _loadAccessibilitySettings() async {
     final highContrast = await _cacheService.getBool('high_contrast');
     final largeText = await _cacheService.getBool('large_text');
-    final onboarded = await _cacheService.getBool('onboarding_seen');
     if (mounted) {
       setState(() {
         _highContrast = highContrast;
         _largeText = largeText;
         _textScaleFactor = largeText ? 1.5 : 1.0;
-        _showOnboarding = !onboarded;
+        // First-run tutorial is not shown automatically on launch. It stays
+        // reachable on demand from Settings > "How to use Logic Legends",
+        // which sets 'onboarding_seen' false and lets the resume hook below
+        // play it. Mark it seen here so a fresh install still lands straight
+        // on the camera.
+        _showOnboarding = false;
         _onboardingChecked = true;
       });
-      // Now that we know: run the tutorial, or (returning user) give the ready
-      // prompt that _announceReady() held back while this was unknown.
-      if (_showOnboarding) {
-        _speakOnboardingStep();
-      } else {
-        _announceReady();
-      }
+      await _cacheService.setBool('onboarding_seen', true);
+      _announceReady();
     }
   }
 
   // --- First-run tutorial -------------------------------------------------
 
   List<String> get _onboardingSteps => [
-        'Welcome to A I For All. It looks at what your camera sees and tells '
+        'Welcome to Logic Legends. It looks at what your camera sees and tells '
             'you out loud what it means. Tap anywhere to hear the next tip.',
         'Point the phone at something and tap anywhere on the screen. It takes '
             'a photo and reads what is in front of you.',
@@ -327,7 +327,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       await SpeechConfig.apply(_tts);
       final msg = _localization.isTamil
           ? 'AI அனைவருக்கும் தயார். படம் எடுக்க எங்கும் தட்டவும்.'
-          : 'A I For All ready. Read and Explain mode. Point at printed text '
+          : 'Logic Legends ready. Read and Explain mode. Point at printed text '
               'and tap anywhere to read it. Swipe left or right to change mode.';
       SpokenText.last = msg;
       await _tts.speak(msg);
@@ -664,7 +664,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final textScale = _textScaleFactor;
 
     return DebugOverlay(
-      enabled: true,
+      // Debug builds only — never on the demo / release APK.
+      enabled: kDebugMode,
       child: MediaQuery(
         data: MediaQuery.of(context).copyWith(
           // Respect the OS text-size slider, but never below the app's floor
@@ -974,7 +975,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             child: SizedBox.expand(child: CameraPreview(_cameraController!)),
           ),
         ),
-        _buildGPSOverlay(),
+        // GPS accuracy is on the AppBar indicator; the floating badge is
+        // diagnostic clutter on the demo build.
+        if (kDebugMode) _buildGPSOverlay(),
         if (!_isProcessing && _emergencyCountdown == null)
           _buildTapAffordance(isTamil),
         if (!isOnline) _buildOfflineBanner(isTamil),

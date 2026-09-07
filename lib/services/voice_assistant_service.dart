@@ -115,7 +115,7 @@ class VoiceAssistantService {
       (RegExp(r'\b(repeat|again|say again)\b', caseSensitive: false), VoiceCommandType.repeatLastResponse),
       
       // Mode switching
-      (RegExp(r'(switch|change|mode).*(explore|text|document|read and explain)', caseSensitive: false), VoiceCommandType.switchMode),
+      (RegExp(r'(switch|change|mode).*(explore|text|document|read and explain|voice chat)', caseSensitive: false), VoiceCommandType.switchMode),
       
       // Features
       (RegExp(r'(turn|toggle|enable|disable).*(gps|location|tts|speech|vibration|browsing|offline)', caseSensitive: false), VoiceCommandType.toggleFeature),
@@ -290,11 +290,11 @@ class VoiceAssistantService {
           _processCommand(result.recognizedWords);
         }
       },
-      listenFor: const Duration(seconds: 10),
-      pauseFor: const Duration(seconds: 3),
       listenOptions: stt.SpeechListenOptions(
         listenMode: stt.ListenMode.dictation,
         partialResults: true,
+        listenFor: const Duration(seconds: 10),
+        pauseFor: const Duration(seconds: 3),
       ),
     );
   }
@@ -352,7 +352,15 @@ class VoiceAssistantService {
 
     switch (type) {
       case VoiceCommandType.switchMode:
-        params['mode'] = lowerText.contains('explore') ? 0 : 1;
+        // Home screen order: 0 Explore, 1 Read & Explain, 2 Voice Chat.
+        // "text" / "document" collapse into the single reading mode (1).
+        if (lowerText.contains('explore')) {
+          params['mode'] = 0;
+        } else if (lowerText.contains('voice chat')) {
+          params['mode'] = 2;
+        } else {
+          params['mode'] = 1;
+        }
         break;
       case VoiceCommandType.toggleFeature:
         if (lowerText.contains('gps') || lowerText.contains('location') || lowerText.contains('இடம்')) params['feature'] = 'gps_enabled';
@@ -484,8 +492,8 @@ class VoiceAssistantService {
   }
 
   void _switchMode(int? mode) {
-    if (mode == null || mode < 0 || mode > 1) return;
-    const names = ['Explore', 'Read & Explain'];
+    if (mode == null || mode < 0 || mode > 2) return;
+    const names = ['Explore', 'Read & Explain', 'Voice Chat'];
     _announce('Switching to ${names[mode]} mode');
     onStatusUpdate?.call('switch_mode:$mode');
   }

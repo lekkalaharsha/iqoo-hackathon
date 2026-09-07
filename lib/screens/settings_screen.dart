@@ -234,8 +234,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               children: [
                 _buildSection(isTamil ? 'AI மாதிரி' : 'AI Model', [
                   // On-Device LLM and Web Browsing toggles removed: neither is
-                  // wired (on_device_llm_service is a stub; web browsing has no
-                  // working destination). Re-add when they actually do something.
+                  // wired (the on-device seam GemmaBackend is a stub; web
+                  // browsing has no working destination). Re-add when they
+                  // actually do something.
                   _buildSwitchTile(
                     title: 'Offline Mode',
                     subtitle: 'Use cached responses when offline',
@@ -425,7 +426,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               _buildCommandRow(_localization.tr('get_directions'), '"Navigate to [place]"'),
               _buildCommandRow(_localization.tr('search_web'), '"Search [topic]", "Weather", "News"'),
               _buildCommandRow(_localization.tr('read_last_response'), '"Read last response", "Repeat"'),
-              _buildCommandRow(_localization.tr('switch_mode'), '"Switch to explore/food/text/document"'),
+              _buildCommandRow(_localization.tr('switch_mode'), '"Switch to explore / read and explain / voice chat"'),
               _buildCommandRow(_localization.tr('toggle_feature'), '"Enable GPS/TTS/Vibration/Browsing"'),
               _buildCommandRow(_localization.tr('emergency'), '"Emergency", "Help me", "SOS"'),
             ],

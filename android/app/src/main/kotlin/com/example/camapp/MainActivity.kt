@@ -56,7 +56,7 @@ class MainActivity : FlutterActivity() {
                         }
                     }
                     // Opens the system "Digital assistant app" picker so the user
-                    // can set AIFORALL as the assistant (power-button-hold launch).
+                    // can set Logic Legends as the assistant (power-button-hold launch).
                     "openAssistSettings" -> {
                         val tries = listOf(
                             "android.settings.VOICE_INPUT_SETTINGS",

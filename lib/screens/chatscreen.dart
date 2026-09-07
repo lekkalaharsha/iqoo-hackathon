@@ -64,7 +64,8 @@ class _ChatscreenState extends State<Chatscreen> {
   ChatUser geminiUser = ChatUser(
     id: "1",
     firstName: "Logic Legends",
-    profileImage: "assets/images/import.jpg",
+    // No profileImage: the asset was never bundled (no `assets:` in pubspec),
+    // so dash_chat_2 falls back to the initials avatar.
   );
 
   @override

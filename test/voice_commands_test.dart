@@ -15,6 +15,11 @@ void main() {
     }
     expect(voice.parseCommand('Switch to explore').parameters['mode'], 0);
   });
+  test('Voice chat mode is reachable by voice and maps to mode 2', () {
+    final result = voice.parseCommand('Switch to voice chat');
+    expect(result.type, VoiceCommandType.switchMode);
+    expect(result.parameters['mode'], 2);
+  });
   test('Short repeat commands work without falling through to AI', () {
     for (final command in ['Repeat', 'Again', 'Say again', 'Repeat last answer']) {
       expect(voice.parseCommand(command).type, VoiceCommandType.repeatLastResponse);
