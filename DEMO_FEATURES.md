@@ -1,6 +1,11 @@
 ﻿> Historical plan/context: consult PROJECT.md for current verification.
 > Offline, accessibility, latency, and device claims below are not current
 > acceptance evidence. Follow AGENTS.md safety rules for all new work.
+>
+> Superseded specifics: the on-device target is Gemma 3 1B (text) / 3n E2B
+> (multimodal) via the `LlmBackend` seam (`lib/services/llm/`), not "Gemma 2B";
+> the first-run tutorial no longer auto-plays (on demand from Settings); the
+> home screen has three modes — Explore, Read & Explain, Voice Chat.
 
 # Logic Legends — iQOO Hackathon 2026 (Chennai) Plan
 

@@ -1,6 +1,6 @@
 ﻿# Logic Legends — Project Tracker
 
-Last updated: 2026-09-05  
+Last updated: 2026-09-07  
 Current working branch: `feature/open-app-by-voice`  
 Primary users: blind and low-vision people
 
@@ -70,7 +70,7 @@ whenever newer evidence becomes available.
 | Explore voice chat / swipe mode | In progress; control parser automated tested | Voice Chat is the third main swipe mode. Device logs showed forced en-IN repeatedly failed to load its language pack (`error 13`) and then reported no speech. The client now prefers en-US online recognition and spaces restarts to reduce microphone churn. It accumulates speech across pauses and submits after “clear over.” | Re-test on I2305 and inspect the recognized ending phrase. Then test repeat, tap-to-cancel, timeout, and TalkBack. Blind-user validation is pending. |
 | Explore / scene description | Implemented; API boundary automated tested; installed | Replaced the failing package stream with a direct authenticated Gemini REST client. It preserves certificate verification, bounds image/prompt input, sanitizes failures, and gives distinct spoken setup, quota, service, photo, and connection recovery. Eleven focused tests pass; corrected APK built, installed, and cold-launched on I2305. An actual scene answer is awaiting user verification. | Capture one non-sensitive scene in Explore, listen for the result, then test airplane-mode recovery and Volume-Down repeat. Add accessible cloud disclosure/consent before wider use. |
 | Offline cache | Implemented | Seven-day/LRU design is documented and supports quick repeat results. | Confirm that cached answers are identified when staleness could matter and can be cleared accessibly. |
-| On-device language model | Planned | Feature flag is currently false and the service is a seam/stub; offline claims are not yet supported by this path. | Benchmark candidate model backends, RAM, heat, latency, and airplane-mode behavior on target hardware. |
+| On-device language model | Planned; seam refactored + automated tested | Text generation now goes through a single `LlmBackend` interface (`lib/services/llm/`). `GeminiBackend` (cloud) is live; `GemmaBackend` (on-device) is an explicit stub reporting `LlmFailure.unsupported`, so `AIService` falls through to cloud. Five focused tests cover the seam. Feature flag still false; no model bundled; offline claims still unsupported. | Implement `GemmaBackend` with `flutter_gemma` + a quantised model behind the flag; benchmark backends, RAM, heat, latency, airplane-mode on target hardware. Keep the template fallback. |
 | English-only localization | Implemented scope decision | English is the supported experience; Tamil assets/dead branches remain. This limits who can benefit. | Keep claims explicit; discuss future languages only after English reliability is validated. |
 
 ## Documentation map and trust boundaries
@@ -394,3 +394,63 @@ older build and disconnected-device results are retained as history.
   Gemini; secrets and content are not added to diagnostics. Accessible cloud
   disclosure/consent remains a release gap.
 - Blind participant experience: Not yet tested.
+
+## LLM seam + voice-mode fixes + tour disable — 2026-09-07
+
+Refactor/cleanup pass plus one product change (tutorial no longer auto-plays).
+
+### Changes
+
+- **`LlmBackend` seam.** `lib/services/llm/llm_backend.dart` defines one
+  interface (`generate` → typed `LlmResult`/`LlmFailure`, `isReady`,
+  `initialize`, `dispose`). `GeminiBackend` wraps the existing bounded REST
+  client and owns the model-fallback list. `GemmaBackend` is a stub
+  (`isReady == false`, returns `LlmFailure.unsupported`) whose class doc carries
+  the full `flutter_gemma` wiring (install → `createModel` → `createChat` →
+  `generateChatResponseAsync`) ready to paste. `AIService` now holds one cloud +
+  one on-device backend, tries on-device first when ready, and maps
+  `LlmFailure` to the same spoken recovery messages as before. Deleted the
+  redundant `on_device_llm_service.dart` stub. Wiring a real on-device model —
+  which is also what makes the Voice Chat mode run on-device, since that mode
+  already routes through `AIService` — is now a change to `GemmaBackend` alone
+  plus adding the `flutter_gemma` dependency and a model file.
+- **First-run tutorial no longer auto-plays.** `homepage._loadAccessibilitySettings`
+  no longer shows the 7-step overlay on launch; a fresh install lands straight
+  on the camera and hears the readiness prompt. The tutorial stays reachable on
+  demand from Settings > "How to use Logic Legends" (unchanged resume-hook
+  path). Overlay/step code is retained, just not triggered at launch.
+- **Demo-build cleanup.** Default landed mode is Read & Explain (`_selectedIndex`
+  starts at 1) — confirmed, matches the readiness announcement. `DebugOverlay`
+  and the floating GPS accuracy badge are now gated to `kDebugMode`, so the
+  release/demo APK shows neither (GPS accuracy is still on the AppBar
+  indicator). Two remaining "A I For All" spoken strings → "Logic Legends".
+- **Voice mode consistency.** `voice_assistant_service` `_switchMode` and the
+  command parser now cover all three home modes (0 Explore, 1 Read & Explain,
+  2 Voice Chat) — "switch to voice chat" was previously unreachable by voice.
+  `homepage._announceModeChange` now reuses `_getModeName` instead of a
+  two-element list that would have thrown `RangeError` on mode 2.
+  `homepage._captureImageByVoice` clamps the incoming mode.
+- **Deprecation + stale strings.** `_startCommandListening` moves
+  `listenFor`/`pauseFor` into `SpeechListenOptions` (removes deprecated-arg
+  warnings). Settings commands list, debug overlay model label, and two
+  "AIFORALL" code comments updated to match the current name and modes.
+
+### Evidence
+
+- `flutter analyze`: 0 error-level diagnostics (78 warning/info, down from 82).
+- `flutter test` focused suite: 21 pass — `llm_backend_test.dart` (5, new),
+  `voice_commands_test.dart` (5, +1 new voice-chat case), `gemini_api_client`,
+  `read_explain_safety`, `voice_chat_logic` unchanged and green.
+- Pure self-checks: `read_explain_logic`, `sms_classifier`, `intent_resolver`
+  all pass.
+- `flutter build apk --debug --target-platform android-arm64`: succeeds.
+- **Not done:** device install, TalkBack/screen-covered walkthrough, blind-user
+  validation. No behaviour change to capture/repeat/emergency paths, but the
+  voice-chat-by-voice route and the mode-name announcement are untested on
+  hardware.
+
+| Date | Feature | New stage | Evidence | Blind-user finding | Follow-up |
+| --- | --- | --- | --- | --- | --- |
+| 2026-09-07 | LLM backend seam | Implemented; automated tested | One `LlmBackend` interface; `GeminiBackend` live, `GemmaBackend` stub; `AIService` refactored; 5 focused tests; analyze clean; arm64 APK builds. | Not applicable; internal refactor, no behaviour change. | Implement `GemmaBackend` with `flutter_gemma` behind the `on_device_llm` flag; benchmark on device. |
+| 2026-09-07 | Voice reaches Voice Chat mode + mode-name fix | Implemented; automated tested | Parser + `_switchMode` cover modes 0–2; `_announceModeChange` reuses `_getModeName` (removes a latent `RangeError`); new parser test passes. | Not tested with a blind participant or on hardware. | Verify "switch to voice chat" by voice on I2305 with the screen covered; confirm the spoken mode name and traversal. |
+| 2026-09-07 | First-run tutorial disabled at launch | Implemented | `_loadAccessibilitySettings` marks onboarding seen and skips the overlay; `_announceReady()` speaks instead. Settings replay path unchanged. arm64 APK builds. | Not tested on hardware. Confirm a clear-data install lands on the camera and speaks "ready", and that the Settings replay still plays all 7 steps. | Device-verify both paths with the screen covered. |

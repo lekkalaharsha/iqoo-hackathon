@@ -37,15 +37,21 @@ failure. Instead, one capture drives two paths:
 OCR is the intended fast path, but it can fail or misread text. The
 speech and failure behavior still require physical-device validation.
 
-The language model behind the explanation is a **seam** (`AiService.explain`):
+The language model behind the explanation is a **seam**: one `LlmBackend`
+interface (`lib/services/llm/`) with a cloud implementation (`GeminiBackend`)
+and an on-device one (`GemmaBackend`). `AIService` tries on-device first when
+ready and falls back to cloud; callers (`AIService.explain`,
+`AIService.generateResponse`) are unchanged.
 
-| Phase | Runs on | Why |
+| Phase | Backend | Why |
 | --- | --- | --- |
-| Submission video | cloud Gemini (`gemini-3.6-flash`) | proves the flow and UX |
-| Hackathon build | on-device via `flutter_gemma` (Gemma 2B) | the graded version, airplane mode on stage |
+| Submission video | `GeminiBackend` — cloud Gemini (`gemini-flash-latest`) | proves the flow and UX |
+| Hackathon build | `GemmaBackend` — on-device via `flutter_gemma`, Gemma 3 1B (text) or 3n E2B (multimodal) | the graded version, airplane mode on stage |
 
-Everything else — OCR, document classification, fallback templates, cache,
-text-to-speech — already runs on-device.
+`GemmaBackend` is currently a stub (reports `unsupported`); its class doc holds
+the exact `flutter_gemma` wiring to enable it. Everything else — OCR, document
+classification, fallback templates, cache, text-to-speech — already runs
+on-device.
 
 ### Blind-first interaction
 
@@ -61,9 +67,10 @@ The user never sees the screen, so nothing depends on finding a control.
 | Hold the power button | Opens the app (registered as an Android `ASSIST` provider) |
 
 Volume keys are intercepted natively in `MainActivity.kt` and the system volume
-UI is suppressed while the app is foregrounded. Launch speaks a prompt; every
-action confirms by haptic and voice. Speech is de-duplicated so unchanged
-information is never repeated.
+UI is suppressed while the app is foregrounded. Launch speaks a readiness
+prompt (the first-run tutorial does **not** auto-play; it is on demand from
+Settings > "How to use Logic Legends"). Every action confirms by haptic and
+voice. Speech is de-duplicated so unchanged information is never repeated.
 
 ### Modes
 
@@ -108,10 +115,10 @@ lib/
 │   ├── ocr_service.dart              ML Kit on-device text recognition
 │   ├── read_explain_logic.dart       PURE: classify, fallback templates, prompt,
 │   │                                 sentence-split — has a `dart run` self-check
-│   ├── ai_service.dart               cloud Gemini today; explain() is the
-│   │                                 on-device seam for flutter_gemma
+│   ├── ai_service.dart               orchestration: browsing, cache, seam
+│   ├── llm/                          LlmBackend seam — GeminiBackend (cloud),
+│   │                                 GemmaBackend (on-device stub)
 │   ├── gemini_api_client.dart        bounded authenticated Gemini REST client
-│   ├── on_device_llm_service.dart    stub — returns null (cloud fallback)
 │   ├── speech_config.dart            single source for TTS rate/pitch/language
 │   ├── hardware_keys.dart            volume-rocker EventChannel + repeat buffer
 │   ├── emergency_service.dart        countdown, cancel, location, dialling
@@ -148,7 +155,11 @@ flutter run                     # or: flutter build apk --release
 ```bash
 dart run lib/services/read_explain_logic.dart
 dart run lib/services/sms_classifier.dart
+dart run lib/services/intent_resolver.dart
 ```
+
+Focused test suite: `flutter test test/` (skip `widget_test.dart`, which is a
+known-broken Mockito stub).
 
 ### Notes / known constraints
 
@@ -160,8 +171,9 @@ dart run lib/services/sms_classifier.dart
 - `speech_to_text` needs a real system recogniser; it does not initialise on some
   MIUI builds. Expected to work on the iQOO 15.
 
-See `DEMO_FEATURES.md` for the hackathon plan, the model decision, the Sept 4
-spike, and the 90-second demo script.
+`PROJECT.md` is the current source of truth for status and evidence.
+`DEMO_FEATURES.md` holds the earlier hackathon plan and demo scripts — some of
+its model/latency figures (e.g. "Gemma 2B") are superseded by `PROJECT.md`.
 
 ---
 
