@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../services/browsing_service.dart';
 import '../services/config_service.dart';
 import '../services/localization_service.dart';
+import '../services/plain_text.dart';
 import 'llm/llm_backend.dart';
 import 'llm/gemini_backend.dart';
 import 'llm/gemma_backend.dart';
@@ -117,15 +118,17 @@ class AIService {
       final onDeviceResult =
           await _onDevice.generate(prompt: promptText, timeout: timeout);
       if (onDeviceResult.hasText) {
-        _emitSentences(onDeviceResult.value!, onSentence);
-        return onDeviceResult.value;
+        final clean = toPlainSpeech(onDeviceResult.value!);
+        _emitSentences(clean, onSentence);
+        return clean;
       }
     }
 
     final result = await _cloud.generate(prompt: promptText, timeout: timeout);
     if (result.hasText) {
-      _emitSentences(result.value!, onSentence);
-      return result.value;
+      final clean = toPlainSpeech(result.value!);
+      _emitSentences(clean, onSentence);
+      return clean;
     }
     return null;
   }
@@ -313,8 +316,12 @@ Instructions: Use the above real-time information to provide an accurate, up-to-
   }
 
   String _formatResponse(String response, String? browsingContext) {
+    // The app speaks this and shows it as one block — strip any Markdown the
+    // model added (## headings, **bold**, - bullets, `code`).
+    final clean = toPlainSpeech(response);
+
     if (browsingContext == null || browsingContext.isEmpty) {
-      return response;
+      return clean;
     }
 
     // Add source attribution
@@ -322,7 +329,7 @@ Instructions: Use the above real-time information to provide an accurate, up-to-
         ? '\n\n📱 தகவல் மூலம்: வலை தேடல் (Real-time web search)'
         : '\n\n📱 Source: Web search (Real-time)';
 
-    return response + sourceNote;
+    return clean + sourceNote;
   }
 
   void setUseOnDevice(bool use) {

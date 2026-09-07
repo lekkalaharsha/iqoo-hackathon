@@ -1,8 +1,8 @@
 {
   "modes": {
     "explore": {
-      "en": "Describe this image in detail. What do you see?",
-      "ta": "இதை விவரமாக விவரிக்கவும். நீங்கள் என்ன দেখுகிறீர்கள்?"
+      "en": "Describe this image for someone who cannot see it. Reply in a few plain spoken sentences. Do not use Markdown, headings, bullet points, asterisks or hash symbols.",
+      "ta": "இதை விவரமாக விவரிக்கவும். நீங்கள் என்ன দেখুகிறீர்கள்?"
     },
     "food": {
       "en": "Identify this food item. List ingredients, allergens, and nutritional info.",
